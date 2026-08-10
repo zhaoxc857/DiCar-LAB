@@ -155,6 +155,16 @@ pub struct ParamDescriptor {
 
 impl ParamDescriptor {
     fn validate(&self) -> Result<(), ProtocolError> {
+        for (value, limit) in [
+            (&self.machine_name, MAX_MACHINE_NAME_LEN),
+            (&self.display_name, MAX_DISPLAY_NAME_LEN),
+            (&self.group, MAX_GROUP_LEN),
+            (&self.unit, MAX_UNIT_LEN),
+        ] {
+            if value.len() > limit || value.len() > u8::MAX as usize {
+                return Err(ProtocolError::StringTooLong);
+            }
+        }
         if self.default_value.param_type() != self.param_type {
             return Err(ProtocolError::InvalidValue);
         }
@@ -554,4 +564,29 @@ pub fn canonical_parameter_crc32(entries: &[(u32, ParamValue)]) -> Result<u32, P
         value.encode_canonical(&mut canonical);
     }
     Ok(crc32_iso_hdlc(&canonical))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encoded_len_rejects_an_overlong_machine_name() {
+        let descriptor = ParamDescriptor {
+            param_id: 1,
+            param_type: ParamType::U32,
+            flags: ParamFlags::WRITABLE,
+            machine_name: "m".repeat(MAX_MACHINE_NAME_LEN + 1),
+            display_name: "Display".into(),
+            group: "Group".into(),
+            unit: "unit".into(),
+            default_value: ParamValue::U32(1),
+            constraints: ParamConstraints::None,
+        };
+
+        assert!(matches!(
+            descriptor.encoded_len(),
+            Err(ProtocolError::StringTooLong)
+        ));
+    }
 }
