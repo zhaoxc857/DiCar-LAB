@@ -69,6 +69,64 @@ fn new_hello_produces_a_nonzero_new_session_and_invalidates_the_previous_one() {
 }
 
 #[test]
+fn duplicate_wire_hello_replays_the_first_ack_without_reopening_the_session() {
+    let mut device = SimDevice::new(SimConfig::default());
+    let hello = Hello {
+        client_nonce: 0x1234_5678,
+        min_version: 1,
+        max_version: 1,
+        max_payload: 1_024,
+    };
+    let request = request(MessageType::Hello, 41, 0, hello.encode().unwrap());
+
+    let first = device.handle(request.clone(), 1);
+    let second = device.handle(request, 2);
+    let first_ack = HelloAck::decode(&only_response(first.clone()).payload).unwrap();
+
+    assert_eq!(second, first);
+    assert!(device.validate_session(first_ack.session_id).is_ok());
+}
+
+#[test]
+fn same_sequence_hello_with_a_different_nonce_opens_a_new_session() {
+    let mut device = SimDevice::new(SimConfig::default());
+    let first_request = request(
+        MessageType::Hello,
+        41,
+        0,
+        Hello {
+            client_nonce: 0x1111_1111,
+            min_version: 1,
+            max_version: 1,
+            max_payload: 1_024,
+        }
+        .encode()
+        .unwrap(),
+    );
+    let second_request = request(
+        MessageType::Hello,
+        41,
+        0,
+        Hello {
+            client_nonce: 0x2222_2222,
+            min_version: 1,
+            max_version: 1,
+            max_payload: 1_024,
+        }
+        .encode()
+        .unwrap(),
+    );
+
+    let first = HelloAck::decode(&only_response(device.handle(first_request, 1)).payload).unwrap();
+    let second =
+        HelloAck::decode(&only_response(device.handle(second_request, 2)).payload).unwrap();
+
+    assert_ne!(second.session_id, first.session_id);
+    assert!(device.validate_session(first.session_id).is_err());
+    assert!(device.validate_session(second.session_id).is_ok());
+}
+
+#[test]
 fn wrong_session_returns_invalid_session_without_mutating_the_parameter() {
     let mut device = SimDevice::new(SimConfig::default());
     let session = device.open_session(11, 0).unwrap();

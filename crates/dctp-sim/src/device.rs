@@ -40,6 +40,12 @@ struct Parameter {
     revision: u32,
 }
 
+#[derive(Clone, Debug)]
+struct CompletedHello {
+    request: Frame,
+    response: Frame,
+}
+
 #[derive(Debug)]
 pub struct SimDevice {
     config: SimConfig,
@@ -47,6 +53,7 @@ pub struct SimDevice {
     session_counter: u32,
     parameters: Vec<Parameter>,
     request_cache: RequestCache,
+    completed_hello: Option<CompletedHello>,
 }
 
 impl SimDevice {
@@ -68,12 +75,19 @@ impl SimDevice {
             session_counter: 0,
             parameters,
             request_cache: RequestCache::default(),
+            completed_hello: None,
         }
     }
 
     pub fn handle(&mut self, request: Frame, now_ms: u64) -> Vec<QueuedFrame> {
         self.expire_session(now_ms);
         if request.header.message_type == MessageType::Hello {
+            if let Some(response) = self.replay_completed_hello(&request, now_ms) {
+                return vec![QueuedFrame {
+                    priority: Priority::Safety,
+                    frame: response,
+                }];
+            }
             return self.handle_hello(request, now_ms);
         }
         if self.validate_session(request.header.session_id).is_err() {
@@ -127,6 +141,7 @@ impl SimDevice {
             last_valid_frame_ms: now_ms,
         });
         self.request_cache.clear();
+        self.completed_hello = None;
         Ok(session_id)
     }
 
@@ -156,7 +171,24 @@ impl SimDevice {
         if expired {
             self.session = None;
             self.request_cache.clear();
+            self.completed_hello = None;
         }
+    }
+
+    fn replay_completed_hello(&mut self, request: &Frame, now_ms: u64) -> Option<Frame> {
+        let completed = self.completed_hello.as_ref()?;
+        if completed.request != *request
+            || request.header.flags.bits() & FrameFlags::ACK_REQUIRED.bits() == 0
+            || self
+                .validate_session(completed.response.header.session_id)
+                .is_err()
+        {
+            return None;
+        }
+        if let Some(session) = &mut self.session {
+            session.last_valid_frame_ms = now_ms;
+        }
+        Some(completed.response.clone())
     }
 
     fn handle_hello(&mut self, request: Frame, now_ms: u64) -> Vec<QueuedFrame> {
@@ -202,15 +234,22 @@ impl SimDevice {
             manifest_crc32,
             max_payload: hello.max_payload.min(MAX_PAYLOAD_LEN as u16),
         };
+        let response = response_frame(
+            MessageType::HelloAck,
+            request.header.sequence,
+            session_id,
+            ack.encode().expect("fixed HELLO_ACK is encodable"),
+            FrameFlags::RESPONSE,
+        );
+        if request.header.flags.bits() & FrameFlags::ACK_REQUIRED.bits() != 0 {
+            self.completed_hello = Some(CompletedHello {
+                request,
+                response: response.clone(),
+            });
+        }
         vec![QueuedFrame {
             priority: Priority::Safety,
-            frame: response_frame(
-                MessageType::HelloAck,
-                request.header.sequence,
-                session_id,
-                ack.encode().expect("fixed HELLO_ACK is encodable"),
-                FrameFlags::RESPONSE,
-            ),
+            frame: response,
         }]
     }
 
