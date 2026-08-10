@@ -6,6 +6,9 @@ use crate::{
 const CRC_LEN: usize = 2;
 
 pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, ProtocolError> {
+    if frame.header.version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
     if frame.payload.len() > MAX_PAYLOAD_LEN
         || usize::from(frame.header.payload_len) != frame.payload.len()
     {

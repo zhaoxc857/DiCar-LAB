@@ -32,3 +32,14 @@ fn corrupted_packet_is_rejected() {
         Err(ProtocolError::CrcMismatch)
     ));
 }
+
+#[test]
+fn unsupported_frame_version_is_rejected_before_encoding() {
+    let mut frame = Frame::new(MessageType::Heartbeat, FrameFlags::NONE, 1, 0, vec![]).unwrap();
+    frame.header.version = 2;
+
+    assert!(matches!(
+        encode_frame(&frame),
+        Err(ProtocolError::UnsupportedVersion)
+    ));
+}
