@@ -67,10 +67,10 @@
 
 - 持有 AppActorHandle。
 - 把 Tauri commands 转换为 CoreCommand。
-- 把 CoreEvent 批量发给 WebView。
+- 通过一个类型化 Tauri Channel 把有序 CoreEvent 批量发给 WebView。
 - 管理窗口关闭前的未固化确认。
 
-Tauri 层不复制 DCTP 编解码，不直接解释参数 Payload。
+Tauri 层不复制 DCTP 编解码，不直接解释参数 Payload。普通 Tauri Event 不承载遥测；前端通过 open_core_channel 命令注册 Channel<BridgeEvent>，命令返回后由同一 Channel 顺序传送快照、操作结果和遥测批次。
 
 ### 4.2 核心接口
 
@@ -127,6 +127,8 @@ AppActor 发出以下事件：
 - settingsStore：主题、窗口、波形窗口与收藏。
 
 组件只能通过 DesktopBridge 接口调用后端。tauriBridge、mockBridge 都实现该接口，测试无需启动桌面 WebView。
+
+DesktopBridge 只暴露 connect、disconnect、writeParameter、commitParameters、revertAll、setTelemetrySubscription、setPaused、selectAccessProfile、getSnapshot 和 subscribe。subscribe 返回解除订阅函数；Tauri 实现使用 Channel，Mock 实现使用进程内有界发布器。
 
 ## 6. B 型菜单主页
 
