@@ -1,0 +1,13 @@
+{
+  "name": "dicar-lab",
+  "private": true,
+  "packageManager": "pnpm@11.16.0",
+  "scripts": {
+    "dev": "pnpm --filter @dicar/desktop dev",
+    "lint": "pnpm --filter @dicar/desktop lint",
+    "typecheck": "pnpm --filter @dicar/desktop typecheck",
+    "test": "pnpm --filter @dicar/desktop test",
+    "build": "pnpm --filter @dicar/desktop build",
+    "test:e2e": "pnpm --filter @dicar/desktop test:e2e"
+  }
+}

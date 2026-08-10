@@ -1,0 +1,18 @@
+:root {
+  --background: #071018;
+  --surface: #0b1620;
+  --surface-raised: #101f2b;
+  --surface-hover: #152836;
+  --border: #263746;
+  --text: #f2f7fa;
+  --text-muted: #a8bac7;
+  --interactive: #38bdf8;
+  --interactive-strong: #0ea5e9;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #fb7185;
+  --focus-ring: #38bdf8;
+  --radius: 6px;
+  --font-ui: Inter, "Noto Sans SC", "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-data: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+}

@@ -1,2 +1,9 @@
 .superpowers/
 .worktrees/
+/target/
+**/node_modules/
+**/dist/
+**/coverage/
+**/playwright-report/
+**/test-results/
+apps/dicar-desktop/src-tauri/target/
