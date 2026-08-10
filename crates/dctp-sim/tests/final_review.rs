@@ -100,14 +100,15 @@ fn hello_rejects_a_limit_smaller_than_the_mandatory_fixed_ack() {
 }
 
 #[test]
-fn actual_hello_ack_advertises_parameters_and_telemetry() {
+fn actual_hello_ack_advertises_parameters_telemetry_and_persistence() {
     let mut device = SimDevice::new(SimConfig::default());
 
     let ack = hello(&mut device, 1_024, 0);
 
     assert_eq!(
         ack.capabilities.bits(),
-        (CapabilityFlags::PARAMETERS | CapabilityFlags::TELEMETRY).bits()
+        (CapabilityFlags::PARAMETERS | CapabilityFlags::TELEMETRY | CapabilityFlags::PERSISTENCE)
+            .bits()
     );
 }
 

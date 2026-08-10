@@ -1,7 +1,7 @@
 use dctp_protocol::{
-    canonical_parameter_crc32, EnumOption, ParamCommit, ParamCommitEntry, ParamConstraints,
-    ParamDescriptor, ParamFlags, ParamRead, ParamState, ParamType, ParamValue, ParamWrite,
-    ParamWriteAck, ProtocolError, WireDecode, WireEncode,
+    canonical_parameter_crc32, EnumOption, ParamCommit, ParamCommitAck, ParamCommitEntry,
+    ParamConstraints, ParamDescriptor, ParamFlags, ParamRead, ParamState, ParamType, ParamValue,
+    ParamWrite, ParamWriteAck, ProtocolError, WireDecode, WireEncode,
 };
 
 #[test]
@@ -13,6 +13,65 @@ fn typed_write_round_trips_with_expected_revision() {
     };
 
     assert_eq!(ParamWrite::decode(&write.encode().unwrap()).unwrap(), write);
+}
+
+#[test]
+fn parameter_state_round_trips_ram_and_flash_values() {
+    let state = ParamState {
+        param_id: 7,
+        revision: 9,
+        value: ParamValue::F32(1.25),
+        persisted_value: Some(ParamValue::F32(1.0)),
+    };
+
+    assert_eq!(ParamState::decode(&state.encode().unwrap()).unwrap(), state);
+}
+
+#[test]
+fn non_persistent_state_round_trips_without_a_flash_value() {
+    let state = ParamState {
+        param_id: 8,
+        revision: 0,
+        value: ParamValue::Bool(true),
+        persisted_value: None,
+    };
+
+    assert_eq!(ParamState::decode(&state.encode().unwrap()).unwrap(), state);
+}
+
+#[test]
+fn commit_ack_round_trips_crc_and_generation() {
+    let ack = ParamCommitAck {
+        canonical_crc32: 0x1234_5678,
+        storage_generation: 42,
+    };
+
+    assert_eq!(ParamCommitAck::decode(&ack.encode().unwrap()).unwrap(), ack);
+}
+
+#[test]
+fn wire_equality_distinguishes_signed_zero_and_nan_payload_bits() {
+    assert!(!ParamValue::F32(-0.0).wire_eq(&ParamValue::F32(0.0)));
+    let first = ParamValue::F32(f32::from_bits(0x7fc0_0001));
+    let same = ParamValue::F32(f32::from_bits(0x7fc0_0001));
+    let other = ParamValue::F32(f32::from_bits(0x7fc0_0002));
+    assert!(first.wire_eq(&same));
+    assert!(!first.wire_eq(&other));
+}
+
+#[test]
+fn parameter_state_rejects_invalid_marker_type_mismatch_and_trailing_bytes() {
+    let invalid_marker = [7, 0, 0, 0, 9, 0, 0, 0, 3, 0, 0, 160, 63, 2];
+    let type_mismatch = [7, 0, 0, 0, 9, 0, 0, 0, 3, 0, 0, 160, 63, 1, 2, 1, 0, 0, 0];
+    let trailing_byte = [8, 0, 0, 0, 0, 0, 0, 0, 4, 1, 0, 0];
+
+    for bytes in [
+        invalid_marker.as_slice(),
+        type_mismatch.as_slice(),
+        trailing_byte.as_slice(),
+    ] {
+        assert!(ParamState::decode(bytes).is_err());
+    }
 }
 
 #[test]
@@ -204,6 +263,7 @@ fn descriptor_and_all_parameter_payloads_round_trip() {
         param_id: 3,
         revision: 9,
         value: ParamValue::Enum(2),
+        persisted_value: None,
     };
     assert_eq!(ParamState::decode(&state.encode().unwrap()).unwrap(), state);
 

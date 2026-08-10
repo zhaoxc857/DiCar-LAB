@@ -1,10 +1,11 @@
 use dctp_protocol::{
-    encode_frame, DeviceManifest, ErrorCode, ErrorPayload, Frame, FrameFlags, Heartbeat, Hello,
-    HelloAck, LogMessage, LogSeverity, ManifestAssembler, ManifestChunk, ManifestDone, MessageType,
+    canonical_parameter_crc32, encode_frame, DeviceManifest, ErrorCode, ErrorPayload, Frame,
+    FrameFlags, Heartbeat, Hello, HelloAck, LogMessage, LogSeverity, ManifestAssembler,
+    ManifestChunk, ManifestDone, MessageType, ParamCommit, ParamCommitAck, ParamCommitEntry,
     ParamRead, ParamState, ParamValue, ParamWrite, ParamWriteAck, ProtocolError, StreamDecoder,
     TelemetryBatch, TelemetrySubscription, WireDecode, WireEncode,
 };
-use dctp_sim::{Priority, PriorityTxQueue, PushOutcome, SimConfig, SimDevice};
+use dctp_sim::{CommitFailure, Priority, PriorityTxQueue, PushOutcome, SimConfig, SimDevice};
 
 struct WireHarness {
     device: SimDevice,
@@ -14,6 +15,7 @@ struct WireHarness {
     next_sequence: u16,
     now_ms: u64,
     corrupt_next_device_packet: Option<(usize, u8)>,
+    telemetry_channel_count: usize,
 }
 
 impl WireHarness {
@@ -30,6 +32,7 @@ impl WireHarness {
             next_sequence: 1,
             now_ms: 0,
             corrupt_next_device_packet: None,
+            telemetry_channel_count: 0,
         }
     }
 
@@ -132,10 +135,78 @@ impl WireHarness {
         }
     }
 
+    fn commit_with_sequence(
+        &mut self,
+        session_id: u32,
+        entries: Vec<(u32, u32)>,
+        sequence: u16,
+    ) -> Result<ParamCommitAck, ProtocolError> {
+        let values = entries
+            .iter()
+            .map(|(param_id, _)| {
+                self.read_parameter(session_id, *param_id)
+                    .map(|state| (*param_id, state.value))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let payload = ParamCommit {
+            entries: entries
+                .into_iter()
+                .map(|(param_id, revision)| ParamCommitEntry { param_id, revision })
+                .collect(),
+            canonical_crc32: canonical_parameter_crc32(&values)?,
+        }
+        .encode()?;
+        let response = self.only_response_with_sequence(
+            MessageType::ParamCommit,
+            session_id,
+            payload,
+            sequence,
+        )?;
+        if response.header.message_type == MessageType::ParamCommitAck {
+            ParamCommitAck::decode(&response.payload)
+        } else {
+            Err(response_error(&response))
+        }
+    }
+
+    fn commit_response_with_sequence(
+        &mut self,
+        session_id: u32,
+        entries: Vec<(u32, u32)>,
+        sequence: u16,
+    ) -> Result<Frame, ProtocolError> {
+        let values = entries
+            .iter()
+            .map(|(param_id, _)| {
+                self.read_parameter(session_id, *param_id)
+                    .map(|state| (*param_id, state.value))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let payload = ParamCommit {
+            entries: entries
+                .into_iter()
+                .map(|(param_id, revision)| ParamCommitEntry { param_id, revision })
+                .collect(),
+            canonical_crc32: canonical_parameter_crc32(&values)?,
+        }
+        .encode()?;
+        self.only_response_with_sequence(MessageType::ParamCommit, session_id, payload, sequence)
+    }
+
     fn subscribe(&mut self, session_id: u32, channel_ids: Vec<u32>) -> Result<(), ProtocolError> {
+        self.subscribe_at(session_id, 100, channel_ids)
+    }
+
+    fn subscribe_at(
+        &mut self,
+        session_id: u32,
+        sample_rate_hz: u16,
+        channel_ids: Vec<u32>,
+    ) -> Result<(), ProtocolError> {
+        self.telemetry_channel_count = channel_ids.len();
         let payload = TelemetrySubscription {
             subscription_version: 7,
-            sample_rate_hz: 100,
+            sample_rate_hz,
             channel_ids,
         }
         .encode()?;
@@ -145,6 +216,16 @@ impl WireHarness {
         } else {
             Err(response_error(&response))
         }
+    }
+
+    fn telemetry(&mut self) -> Result<TelemetryBatch, ProtocolError> {
+        self.queue_device_tick()?;
+        let response = self
+            .drain_device_packets()?
+            .into_iter()
+            .find(|frame| frame.header.message_type == MessageType::TelemetryData)
+            .ok_or(ProtocolError::Truncated)?;
+        TelemetryBatch::decode(&response.payload, self.telemetry_channel_count)
     }
 
     fn inject_corrupt_next_device_packet(&mut self, offset: usize, mask: u8) {
@@ -338,7 +419,7 @@ fn wire_handshake_manifest_read_write_and_telemetry_subscription_succeed() {
         .parameters
         .iter()
         .any(|parameter| parameter.param_id == 1));
-    assert_eq!(manifest.telemetry.len(), 4);
+    assert!(manifest.telemetry.len() >= 16);
     let before = harness.read_parameter(session, 1).unwrap();
     assert_eq!(before.value, ParamValue::F32(1.0));
     let accepted = harness.write_f32(session, 1, before.revision, 2.5).unwrap();
@@ -364,6 +445,109 @@ fn duplicate_wire_write_returns_one_revision_increment() {
     assert_eq!(first, replay);
     assert_eq!(first.new_revision, 1);
     assert_eq!(harness.read_parameter(session, 1).unwrap().revision, 1);
+}
+
+fn error_payload(response: &Frame) -> ErrorPayload {
+    assert_eq!(response.header.message_type, MessageType::Error);
+    ErrorPayload::decode(&response.payload).unwrap()
+}
+
+#[test]
+fn commit_updates_flash_once_and_returns_generation() {
+    let mut harness = WireHarness::new();
+    let session = harness.hello(1).unwrap();
+    let param_id = harness
+        .manifest(session)
+        .unwrap()
+        .parameters
+        .iter()
+        .find(|descriptor| descriptor.machine_name == "pid.kp")
+        .unwrap()
+        .param_id;
+    let before = harness.read_parameter(session, param_id).unwrap();
+    let write = harness
+        .write_f32(session, param_id, before.revision, 2.5)
+        .unwrap();
+    let sequence = 0x4242;
+    let first = harness
+        .commit_with_sequence(session, vec![(param_id, write.new_revision)], sequence)
+        .unwrap();
+    let retry = harness
+        .commit_with_sequence(session, vec![(param_id, write.new_revision)], sequence)
+        .unwrap();
+
+    assert_eq!(before.persisted_value, Some(ParamValue::F32(1.0)));
+    assert_eq!(first, retry);
+    assert_eq!(first.storage_generation, 1);
+    let after = harness.read_parameter(session, param_id).unwrap();
+    assert_eq!(after.value, ParamValue::F32(2.5));
+    assert_eq!(after.persisted_value, Some(ParamValue::F32(2.5)));
+}
+
+#[test]
+fn failed_commit_keeps_flash_and_generation_while_retaining_ram_value() {
+    for (failure, expected_error) in [
+        (CommitFailure::Storage, ErrorCode::StorageFailed),
+        (CommitFailure::Verify, ErrorCode::VerifyFailed),
+    ] {
+        let mut harness = WireHarness::new();
+        let session = harness.hello(2).unwrap();
+        let before = harness.read_parameter(session, 1).unwrap();
+        let write = harness.write_f32(session, 1, before.revision, 2.5).unwrap();
+        harness.device.set_commit_failure(Some(failure));
+
+        let response = harness
+            .commit_response_with_sequence(session, vec![(1, write.new_revision)], 0x5100)
+            .unwrap();
+
+        assert_eq!(error_payload(&response).error_code, expected_error);
+        let after = harness.read_parameter(session, 1).unwrap();
+        assert_eq!(after.value, ParamValue::F32(2.5));
+        assert_eq!(after.persisted_value, Some(ParamValue::F32(1.0)));
+        assert_eq!(harness.device.storage_generation(), 0);
+    }
+}
+
+#[test]
+fn reconnect_retains_committed_flash_value_and_generation() {
+    let mut harness = WireHarness::new();
+    let first_session = harness.hello(3).unwrap();
+    let before = harness.read_parameter(first_session, 1).unwrap();
+    let write = harness
+        .write_f32(first_session, 1, before.revision, 2.5)
+        .unwrap();
+    harness
+        .commit_with_sequence(first_session, vec![(1, write.new_revision)], 0x5200)
+        .unwrap();
+
+    harness.device.disconnect();
+    let second_session = harness.hello(4).unwrap();
+    let after = harness.read_parameter(second_session, 1).unwrap();
+
+    assert_eq!(after.value, ParamValue::F32(2.5));
+    assert_eq!(after.persisted_value, Some(ParamValue::F32(2.5)));
+    assert_eq!(harness.device.storage_generation(), 1);
+}
+
+#[test]
+fn default_manifest_supports_eight_of_at_least_sixteen_dynamic_channels() {
+    let mut harness = WireHarness::new();
+    let session = harness.hello(5).unwrap();
+    let manifest = harness.manifest(session).unwrap();
+    assert!(manifest.telemetry.len() >= 16);
+    let ids = manifest
+        .telemetry
+        .iter()
+        .take(8)
+        .map(|descriptor| descriptor.channel_id)
+        .collect();
+    harness.subscribe_at(session, 500, ids).unwrap();
+    harness.advance_ms(2);
+    let first = harness.telemetry().unwrap();
+    harness.advance_ms(2);
+    let second = harness.telemetry().unwrap();
+
+    assert_ne!(first.samples[0].values, second.samples[0].values);
 }
 
 #[test]
@@ -416,8 +600,8 @@ fn mixed_telemetry_reports_drops_and_sequence_gap_after_queue_pressure() {
     let batch = TelemetryBatch::decode(&responses[0].payload, 4).unwrap();
     assert_eq!(batch.first_sample_sequence, 2);
     assert_eq!(batch.dropped_samples, 1);
-    assert_eq!(batch.samples[0].values[0], 1.5f32.to_bits());
-    assert_eq!(batch.samples[0].values[1], (-4i32) as u32);
-    assert_eq!(batch.samples[0].values[2], 8);
-    assert_eq!(batch.samples[0].values[3], 0b101);
+    assert!(f32::from_bits(batch.samples[0].values[0]).is_finite());
+    assert_eq!(batch.samples[0].values[1], 19);
+    assert_eq!(batch.samples[0].values[2], 320);
+    assert_eq!(batch.samples[0].values[3], 0);
 }

@@ -6,8 +6,8 @@ use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dctp_protocol::{
-    encode_frame, CapabilityFlags, Frame, FrameFlags, Hello, HelloAck, MessageType, ParamValue,
-    ParamWrite, TelemetryBatch, TelemetrySample, WireEncode,
+    encode_frame, CapabilityFlags, Frame, FrameFlags, Hello, HelloAck, MessageType, ParamCommitAck,
+    ParamState, ParamValue, ParamWrite, TelemetryBatch, TelemetrySample, WireEncode,
 };
 use sha2::{Digest, Sha256};
 
@@ -93,6 +93,16 @@ fn build_vectors() -> Result<Vec<Vector>, dctp_protocol::ProtocolError> {
         expected_revision: 7,
         value: ParamValue::F32(2.5),
     };
+    let parameter_state = ParamState {
+        param_id: 1,
+        revision: 7,
+        value: ParamValue::F32(2.5),
+        persisted_value: Some(ParamValue::F32(1.0)),
+    };
+    let commit_ack = ParamCommitAck {
+        canonical_crc32: 0x1234_5678,
+        storage_generation: 42,
+    };
     let telemetry = TelemetryBatch {
         subscription_version: 7,
         first_sample_sequence: 42,
@@ -142,6 +152,28 @@ fn build_vectors() -> Result<Vec<Vector>, dctp_protocol::ProtocolError> {
                 0x1003,
                 0xA1B2_C3D4,
                 write.encode()?,
+            )?)?,
+        },
+        Vector {
+            file: "param-value.bin",
+            description: "PARAM_VALUE with RAM and persisted f32 values",
+            bytes: encode_frame(&Frame::new(
+                MessageType::ParamValue,
+                FrameFlags::RESPONSE,
+                0x1003,
+                0xA1B2_C3D4,
+                parameter_state.encode()?,
+            )?)?,
+        },
+        Vector {
+            file: "param-commit-ack.bin",
+            description: "PARAM_COMMIT_ACK with canonical CRC and storage generation",
+            bytes: encode_frame(&Frame::new(
+                MessageType::ParamCommitAck,
+                FrameFlags::RESPONSE,
+                0x1003,
+                0xA1B2_C3D4,
+                commit_ack.encode()?,
             )?)?,
         },
         Vector {
@@ -259,7 +291,7 @@ mod tests {
     use super::build_vectors;
 
     #[test]
-    fn fixed_messages_produce_the_four_named_vectors() {
+    fn fixed_messages_produce_the_six_named_vectors() {
         let vectors = build_vectors().unwrap();
         assert_eq!(
             vectors.iter().map(|vector| vector.file).collect::<Vec<_>>(),
@@ -267,6 +299,8 @@ mod tests {
                 "hello.bin",
                 "hello-ack.bin",
                 "param-write.bin",
+                "param-value.bin",
+                "param-commit-ack.bin",
                 "telemetry-mixed.bin",
             ]
         );

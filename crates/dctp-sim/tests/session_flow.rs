@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use dctp_protocol::{
     encode_frame, EnumOption, ErrorCode, ErrorPayload, Frame, FrameFlags, Heartbeat, Hello,
     HelloAck, MessageType, ParamConstraints, ParamFlags, ParamState, ParamType, ParamValue,
-    ParamWrite, ParamWriteAck, StreamDecoder, WireDecode, WireEncode,
+    ParamWrite, ParamWriteAck, StreamDecoder, TelemetryType, WireDecode, WireEncode,
 };
 use dctp_sim::{
     Direction, FaultAction, FaultInjector, FaultRule, RequestCache, RequestKey, SimConfig,
@@ -504,6 +504,100 @@ fn default_manifest_has_stable_pid_and_complete_encoder_calibration_parameters()
             writable
         );
         assert_eq!(descriptor.constraints, constraints);
+    }
+}
+
+#[test]
+fn default_manifest_exposes_named_dynamic_drive_channels_with_utf8_labels() {
+    let manifest = SimConfig::default().manifest;
+    let required_names = [
+        "drive.target_speed_mps",
+        "encoder.left_delta",
+        "encoder.right_delta",
+        "encoder.left_total",
+        "encoder.right_total",
+        "drive.left_wheel_speed_mps",
+        "drive.right_wheel_speed_mps",
+        "drive.speed_mps",
+        "drive.speed_error_mps",
+        "motor.left_pwm",
+        "motor.right_pwm",
+        "drive.fault_flags",
+        "control.loop_jitter_us",
+        "power.battery_voltage",
+        "steering.error_deg",
+    ];
+
+    assert!(manifest.telemetry.len() >= 16);
+    for machine_name in required_names {
+        assert!(
+            manifest
+                .telemetry
+                .iter()
+                .any(|descriptor| descriptor.machine_name == machine_name),
+            "missing {machine_name}"
+        );
+    }
+    assert!(manifest.telemetry.iter().any(
+        |descriptor| descriptor.display_name.contains('车') || descriptor.group.contains('驱')
+    ));
+}
+
+#[test]
+fn default_manifest_keeps_the_existing_telemetry_channel_contracts() {
+    let manifest = SimConfig::default().manifest;
+    let existing = [
+        (200, "drive.speed_mps", TelemetryType::F32),
+        (201, "encoder.left_delta", TelemetryType::I32),
+        (202, "encoder.left_total", TelemetryType::U32),
+        (203, "drive.fault_flags", TelemetryType::Flags32),
+    ];
+
+    for (channel_id, machine_name, expected_type) in existing {
+        let descriptor = manifest
+            .telemetry
+            .iter()
+            .find(|descriptor| descriptor.channel_id == channel_id)
+            .unwrap();
+        assert_eq!(descriptor.machine_name, machine_name);
+        assert_eq!(descriptor.telemetry_type, expected_type);
+    }
+}
+
+#[test]
+fn default_manifest_uses_utf8_parameter_labels_for_pid_and_encoder_groups() {
+    let manifest = SimConfig::default().manifest;
+    let pid = manifest
+        .parameters
+        .iter()
+        .find(|descriptor| descriptor.machine_name == "pid.kp")
+        .unwrap();
+    let left_encoder = manifest
+        .parameters
+        .iter()
+        .find(|descriptor| descriptor.machine_name == "encoder.left.ppr")
+        .unwrap();
+
+    assert_eq!(pid.display_name, "速度 Kp");
+    assert_eq!(pid.group, "控制");
+    assert_eq!(left_encoder.param_id, 100);
+    assert_eq!(left_encoder.param_type, ParamType::U32);
+    assert_eq!(left_encoder.default_value, ParamValue::U32(512));
+    for descriptor in manifest
+        .parameters
+        .iter()
+        .filter(|descriptor| descriptor.machine_name.starts_with("encoder."))
+    {
+        assert_eq!(descriptor.group, "编码器", "{}", descriptor.machine_name);
+        assert!(
+            descriptor
+                .display_name
+                .chars()
+                .any(|character| ('\u{4e00}'..='\u{9fff}').contains(&character)),
+            "{} has non-Chinese display name {}",
+            descriptor.machine_name,
+            descriptor.display_name
+        );
     }
 }
 

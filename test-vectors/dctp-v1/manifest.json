@@ -20,6 +20,18 @@
       "sha256": "ad70fc35ae93728f68887b29fac93a103cc4631d363899791da51f73758f9952"
     },
     {
+      "file": "param-value.bin",
+      "description": "PARAM_VALUE with RAM and persisted f32 values",
+      "byte_length": 36,
+      "sha256": "a04207e12ab133557b7b1d3a09e458dcf1de4ce9afc9ecc264be426895b5977a"
+    },
+    {
+      "file": "param-commit-ack.bin",
+      "description": "PARAM_COMMIT_ACK with canonical CRC and storage generation",
+      "byte_length": 25,
+      "sha256": "2f73fc03b7da2d4b5444339c16982acb4bbde4a841ccb92e917c34e55ef871de"
+    },
+    {
       "file": "telemetry-mixed.bin",
       "description": "TELEMETRY_DATA with f32, i32, u32, and flags32 values",
       "byte_length": 65,

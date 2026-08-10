@@ -63,6 +63,18 @@ impl ParamValue {
         }
     }
 
+    pub fn wire_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::I32(left), Self::I32(right)) | (Self::Enum(left), Self::Enum(right)) => {
+                left == right
+            }
+            (Self::U32(left), Self::U32(right)) => left == right,
+            (Self::F32(left), Self::F32(right)) => left.to_bits() == right.to_bits(),
+            (Self::Bool(left), Self::Bool(right)) => left == right,
+            _ => false,
+        }
+    }
+
     fn encode_tagged(&self, writer: &mut WireWriter) {
         writer.put_u8(self.param_type() as u8);
         match self {
@@ -336,6 +348,7 @@ pub struct ParamState {
     pub param_id: u32,
     pub revision: u32,
     pub value: ParamValue,
+    pub persisted_value: Option<ParamValue>,
 }
 
 impl WireEncode for ParamState {
@@ -344,6 +357,14 @@ impl WireEncode for ParamState {
         writer.put_u32(self.param_id);
         writer.put_u32(self.revision);
         self.value.encode_tagged(&mut writer);
+        match &self.persisted_value {
+            Some(value) if value.param_type() == self.value.param_type() => {
+                writer.put_u8(1);
+                value.encode_tagged(&mut writer);
+            }
+            Some(_) => return Err(ProtocolError::InvalidValue),
+            None => writer.put_u8(0),
+        }
         Ok(writer.into_inner())
     }
 }
@@ -351,13 +372,27 @@ impl WireEncode for ParamState {
 impl WireDecode for ParamState {
     fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
         let mut reader = WireReader::new(bytes);
-        let value = Self {
-            param_id: reader.read_u32()?,
-            revision: reader.read_u32()?,
-            value: ParamValue::decode_tagged(&mut reader)?,
+        let param_id = reader.read_u32()?;
+        let revision = reader.read_u32()?;
+        let value = ParamValue::decode_tagged(&mut reader)?;
+        let persisted_value = match reader.read_u8()? {
+            0 => None,
+            1 => {
+                let persisted_value = ParamValue::decode_tagged(&mut reader)?;
+                if persisted_value.param_type() != value.param_type() {
+                    return Err(ProtocolError::InvalidValue);
+                }
+                Some(persisted_value)
+            }
+            _ => return Err(ProtocolError::InvalidValue),
         };
         reader.finish()?;
-        Ok(value)
+        Ok(Self {
+            param_id,
+            revision,
+            value,
+            persisted_value,
+        })
     }
 }
 
@@ -517,12 +552,14 @@ impl WireDecode for ParamCommit {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ParamCommitAck {
     pub canonical_crc32: u32,
+    pub storage_generation: u32,
 }
 
 impl WireEncode for ParamCommitAck {
     fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
         let mut writer = WireWriter::new();
         writer.put_u32(self.canonical_crc32);
+        writer.put_u32(self.storage_generation);
         Ok(writer.into_inner())
     }
 }
@@ -532,6 +569,7 @@ impl WireDecode for ParamCommitAck {
         let mut reader = WireReader::new(bytes);
         let value = Self {
             canonical_crc32: reader.read_u32()?,
+            storage_generation: reader.read_u32()?,
         };
         reader.finish()?;
         Ok(value)

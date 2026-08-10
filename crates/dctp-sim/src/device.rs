@@ -1,10 +1,10 @@
 use dctp_protocol::{
-    CapabilityFlags, DeviceManifest, EnumOption, ErrorCode, ErrorPayload, Frame, FrameFlags,
-    Heartbeat, Hello, HelloAck, ManifestChunk, ManifestDone, MessageType, ParamConstraints,
-    ParamDescriptor, ParamFlags, ParamRead, ParamState, ParamType, ParamValue, ParamWrite,
-    ParamWriteAck, ProtocolError, TelemetryBatch, TelemetryDescriptor, TelemetrySample,
-    TelemetrySubscription, TelemetryType, WireDecode, WireEncode, MANIFEST_SCHEMA_VERSION,
-    MAX_PAYLOAD_LEN, MAX_TELEMETRY_SAMPLES,
+    canonical_parameter_crc32, CapabilityFlags, DeviceManifest, EnumOption, ErrorCode,
+    ErrorPayload, Frame, FrameFlags, Heartbeat, Hello, HelloAck, ManifestChunk, ManifestDone,
+    MessageType, ParamCommit, ParamCommitAck, ParamConstraints, ParamDescriptor, ParamFlags,
+    ParamRead, ParamState, ParamType, ParamValue, ParamWrite, ParamWriteAck, ProtocolError,
+    TelemetryBatch, TelemetryDescriptor, TelemetrySample, TelemetrySubscription, TelemetryType,
+    WireDecode, WireEncode, MANIFEST_SCHEMA_VERSION, MAX_PAYLOAD_LEN, MAX_TELEMETRY_SAMPLES,
 };
 
 use crate::{Priority, QueuedFrame, RequestCache, RequestKey};
@@ -13,6 +13,12 @@ pub const SESSION_EXPIRATION_MS: u64 = 3_000;
 const HELLO_ACK_PAYLOAD_LEN: u16 = 46;
 const MANIFEST_CHUNK_PREFIX_LEN: usize = 12;
 const TELEMETRY_BATCH_PREFIX_LEN: usize = 12;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommitFailure {
+    Storage,
+    Verify,
+}
 
 #[derive(Clone, Debug)]
 pub struct SimConfig {
@@ -42,6 +48,7 @@ struct Session {
 struct Parameter {
     descriptor: ParamDescriptor,
     value: ParamValue,
+    persisted_value: Option<ParamValue>,
     revision: u32,
 }
 
@@ -63,6 +70,8 @@ pub struct SimDevice {
     session: Option<Session>,
     session_counter: u32,
     parameters: Vec<Parameter>,
+    storage_generation: u32,
+    commit_failure: Option<CommitFailure>,
     request_cache: RequestCache,
     completed_hello: Option<CompletedHello>,
     completed_close: Option<CompletedClose>,
@@ -81,6 +90,8 @@ impl SimDevice {
             .cloned()
             .map(|descriptor| Parameter {
                 value: descriptor.default_value.clone(),
+                persisted_value: (descriptor.flags.bits() & ParamFlags::PERSISTENT.bits() != 0)
+                    .then(|| descriptor.default_value.clone()),
                 descriptor,
                 revision: 0,
             })
@@ -90,6 +101,8 @@ impl SimDevice {
             session: None,
             session_counter: 0,
             parameters,
+            storage_generation: 0,
+            commit_failure: None,
             request_cache: RequestCache::default(),
             completed_hello: None,
             completed_close: None,
@@ -192,7 +205,7 @@ impl SimDevice {
             .checked_div(period_us)
             .unwrap_or(0)
             .saturating_add(1);
-        let values = subscription
+        let descriptors = subscription
             .channel_ids
             .iter()
             .map(|channel_id| {
@@ -201,14 +214,14 @@ impl SimDevice {
                     .telemetry
                     .iter()
                     .find(|descriptor| descriptor.channel_id == *channel_id)
-                    .map(telemetry_value)
+                    .cloned()
             })
             .collect::<Option<Vec<_>>>();
-        let Some(values) = values else {
+        let Some(descriptors) = descriptors else {
             self.clear_telemetry_state();
             return Vec::new();
         };
-        let sample_payload_len = 2usize.saturating_add(values.len().saturating_mul(4));
+        let sample_payload_len = 2usize.saturating_add(descriptors.len().saturating_mul(4));
         let payload_sample_capacity = usize::from(max_payload)
             .saturating_sub(TELEMETRY_BATCH_PREFIX_LEN)
             .checked_div(sample_payload_len)
@@ -240,7 +253,19 @@ impl SimDevice {
         let samples = (0..emitted_samples)
             .map(|index| TelemetrySample {
                 dt_us: if index == 0 { 0 } else { dt_us },
-                values: values.clone(),
+                values: descriptors
+                    .iter()
+                    .map(|descriptor| {
+                        telemetry_value(
+                            descriptor,
+                            next_telemetry_at_us.saturating_add(
+                                skipped_samples
+                                    .saturating_add(index)
+                                    .saturating_mul(period_us),
+                            ),
+                        )
+                    })
+                    .collect(),
             })
             .collect();
         let batch = TelemetryBatch {
@@ -320,6 +345,14 @@ impl SimDevice {
             .iter()
             .find(|parameter| parameter.descriptor.param_id == param_id)
             .map(|parameter| parameter.revision)
+    }
+
+    pub const fn storage_generation(&self) -> u32 {
+        self.storage_generation
+    }
+
+    pub fn set_commit_failure(&mut self, failure: Option<CommitFailure>) {
+        self.commit_failure = failure;
     }
 
     pub const fn manifest(&self) -> &DeviceManifest {
@@ -417,7 +450,9 @@ impl SimDevice {
             sdk_major: 1,
             sdk_minor: 0,
             sdk_patch: 0,
-            capabilities: CapabilityFlags::PARAMETERS | CapabilityFlags::TELEMETRY,
+            capabilities: CapabilityFlags::PARAMETERS
+                | CapabilityFlags::TELEMETRY
+                | CapabilityFlags::PERSISTENCE,
             manifest_crc32,
             max_payload: negotiated_max_payload,
         };
@@ -446,6 +481,7 @@ impl SimDevice {
             MessageType::ManifestRequest => self.handle_manifest_request(request),
             MessageType::ParamRead => self.handle_param_read(request),
             MessageType::ParamWrite => self.handle_param_write(request),
+            MessageType::ParamCommit => self.handle_param_commit(request),
             MessageType::TelemetrySubscribe => self.handle_telemetry_subscribe(request, now_ms),
             MessageType::TelemetryStop => self.handle_telemetry_stop(request),
             MessageType::SessionClose => {
@@ -579,6 +615,7 @@ impl SimDevice {
             param_id: read.param_id,
             revision: parameter.revision,
             value: parameter.value.clone(),
+            persisted_value: parameter.persisted_value.clone(),
         };
         vec![QueuedFrame {
             priority: Priority::Reliable,
@@ -648,6 +685,76 @@ impl SimDevice {
                 request.header.sequence,
                 request.header.session_id,
                 ack.encode().expect("accepted parameter ACK is encodable"),
+                FrameFlags::RESPONSE,
+            ),
+        }]
+    }
+
+    fn handle_param_commit(&mut self, request: &Frame) -> Vec<QueuedFrame> {
+        let commit = match ParamCommit::decode(&request.payload) {
+            Ok(commit) => commit,
+            Err(_) => {
+                return vec![self.error_response(request, ErrorCode::InvalidLength, String::new())]
+            }
+        };
+        let mut values = Vec::with_capacity(commit.entries.len());
+        for entry in &commit.entries {
+            let Some(parameter) = self
+                .parameters
+                .iter()
+                .find(|parameter| parameter.descriptor.param_id == entry.param_id)
+            else {
+                return vec![self.error_response(
+                    request,
+                    ErrorCode::InvalidParamId,
+                    String::new(),
+                )];
+            };
+            if parameter.descriptor.flags.bits() & ParamFlags::PERSISTENT.bits() == 0 {
+                return vec![self.error_response(request, ErrorCode::ReadOnly, String::new())];
+            }
+            if parameter.revision != entry.revision {
+                return vec![self.error_response(
+                    request,
+                    ErrorCode::RevisionConflict,
+                    String::new(),
+                )];
+            }
+            values.push((entry.param_id, parameter.value.clone()));
+        }
+        let Ok(canonical_crc32) = canonical_parameter_crc32(&values) else {
+            return vec![self.error_response(request, ErrorCode::InvalidLength, String::new())];
+        };
+        if commit.canonical_crc32 != canonical_crc32 {
+            return vec![self.error_response(request, ErrorCode::InvalidLength, String::new())];
+        }
+        if let Some(failure) = self.commit_failure {
+            let error = match failure {
+                CommitFailure::Storage => ErrorCode::StorageFailed,
+                CommitFailure::Verify => ErrorCode::VerifyFailed,
+            };
+            return vec![self.error_response(request, error, String::new())];
+        }
+        for entry in &commit.entries {
+            let parameter = self
+                .parameters
+                .iter_mut()
+                .find(|parameter| parameter.descriptor.param_id == entry.param_id)
+                .expect("validated parameter exists");
+            parameter.persisted_value = Some(parameter.value.clone());
+        }
+        self.storage_generation = self.storage_generation.wrapping_add(1);
+        let ack = ParamCommitAck {
+            canonical_crc32,
+            storage_generation: self.storage_generation,
+        };
+        vec![QueuedFrame {
+            priority: Priority::Reliable,
+            frame: response_frame(
+                MessageType::ParamCommitAck,
+                request.header.sequence,
+                request.header.session_id,
+                ack.encode().expect("commit acknowledgement is encodable"),
                 FrameFlags::RESPONSE,
             ),
         }]
@@ -821,13 +928,22 @@ fn fixed_manifest() -> DeviceManifest {
         schema_version: MANIFEST_SCHEMA_VERSION,
         parameters: vec![
             numeric_f32(
-                1, "pid.kp", "PID Kp", "Control", "", 1.0, 0.0, 1_000.0, 0.01, writable,
+                1,
+                "pid.kp",
+                "速度 Kp",
+                "控制",
+                "",
+                1.0,
+                0.0,
+                1_000.0,
+                0.01,
+                writable,
             ),
             numeric_u32(
                 100,
                 "encoder.left.ppr",
-                "Left encoder PPR",
-                "Encoder",
+                "左编码器 PPR",
+                "编码器",
                 "pulse/rev",
                 512,
                 1,
@@ -838,8 +954,8 @@ fn fixed_manifest() -> DeviceManifest {
             numeric_u32(
                 101,
                 "encoder.right.ppr",
-                "Right encoder PPR",
-                "Encoder",
+                "右编码器 PPR",
+                "编码器",
                 "pulse/rev",
                 512,
                 1,
@@ -852,8 +968,8 @@ fn fixed_manifest() -> DeviceManifest {
                 param_type: ParamType::Enum,
                 flags: writable,
                 machine_name: "encoder.quadrature_multiplier".into(),
-                display_name: "Quadrature multiplier".into(),
-                group: "Encoder".into(),
+                display_name: "正交倍频".into(),
+                group: "编码器".into(),
                 unit: "x".into(),
                 default_value: ParamValue::Enum(4),
                 constraints: ParamConstraints::Enum {
@@ -876,8 +992,8 @@ fn fixed_manifest() -> DeviceManifest {
             numeric_u32(
                 103,
                 "encoder.left.cpr",
-                "Left encoder CPR",
-                "Encoder",
+                "左编码器 CPR",
+                "编码器",
                 "count/rev",
                 2_048,
                 1,
@@ -888,8 +1004,8 @@ fn fixed_manifest() -> DeviceManifest {
             numeric_u32(
                 104,
                 "encoder.right.cpr",
-                "Right encoder CPR",
-                "Encoder",
+                "右编码器 CPR",
+                "编码器",
                 "count/rev",
                 2_048,
                 1,
@@ -897,18 +1013,8 @@ fn fixed_manifest() -> DeviceManifest {
                 1,
                 ParamFlags::NONE,
             ),
-            boolean(
-                105,
-                "encoder.left.inverted",
-                "Left encoder inverted",
-                writable,
-            ),
-            boolean(
-                106,
-                "encoder.right.inverted",
-                "Right encoder inverted",
-                writable,
-            ),
+            boolean(105, "encoder.left.inverted", "左编码器反向", writable),
+            boolean(106, "encoder.right.inverted", "右编码器反向", writable),
             numeric_f32(
                 107,
                 "drive.wheel_diameter_mm",
@@ -936,8 +1042,8 @@ fn fixed_manifest() -> DeviceManifest {
             numeric_u32(
                 109,
                 "encoder.sample_period_us",
-                "Encoder sample period",
-                "Encoder",
+                "编码器采样周期",
+                "编码器",
                 "us",
                 10_000,
                 100,
@@ -948,8 +1054,8 @@ fn fixed_manifest() -> DeviceManifest {
             numeric_f32(
                 110,
                 "encoder.speed_lpf_hz",
-                "Encoder speed LPF",
-                "Encoder",
+                "编码器速度低通截止频率",
+                "编码器",
                 "Hz",
                 50.0,
                 0.0,
@@ -960,8 +1066,8 @@ fn fixed_manifest() -> DeviceManifest {
             numeric_u32(
                 111,
                 "encoder.jump_threshold_counts",
-                "Encoder jump threshold",
-                "Encoder",
+                "编码器跳变阈值",
+                "编码器",
                 "count",
                 10_000,
                 1,
@@ -972,8 +1078,8 @@ fn fixed_manifest() -> DeviceManifest {
             numeric_f32(
                 112,
                 "encoder.max_credible_rpm",
-                "Maximum credible RPM",
-                "Encoder",
+                "编码器最大可信转速",
+                "编码器",
                 "rpm",
                 10_000.0,
                 1.0,
@@ -984,7 +1090,7 @@ fn fixed_manifest() -> DeviceManifest {
             boolean(
                 113,
                 "encoder.missing_pulse_detection",
-                "Missing pulse detection",
+                "编码器丢脉冲检测",
                 writable,
             ),
         ],
@@ -993,33 +1099,129 @@ fn fixed_manifest() -> DeviceManifest {
                 channel_id: 200,
                 telemetry_type: TelemetryType::F32,
                 machine_name: "drive.speed_mps".into(),
-                display_name: "Vehicle speed".into(),
-                group: "Drive".into(),
+                display_name: "车辆速度".into(),
+                group: "驱动".into(),
                 unit: "m/s".into(),
             },
             TelemetryDescriptor {
                 channel_id: 201,
                 telemetry_type: TelemetryType::I32,
                 machine_name: "encoder.left_delta".into(),
-                display_name: "Left encoder delta".into(),
-                group: "Encoder".into(),
+                display_name: "左编码器增量".into(),
+                group: "编码器".into(),
                 unit: "count".into(),
             },
             TelemetryDescriptor {
                 channel_id: 202,
                 telemetry_type: TelemetryType::U32,
                 machine_name: "encoder.left_total".into(),
-                display_name: "Left encoder total".into(),
-                group: "Encoder".into(),
+                display_name: "左编码器总数".into(),
+                group: "编码器".into(),
                 unit: "count".into(),
             },
             TelemetryDescriptor {
                 channel_id: 203,
                 telemetry_type: TelemetryType::Flags32,
                 machine_name: "drive.fault_flags".into(),
-                display_name: "Drive fault flags".into(),
-                group: "Drive".into(),
+                display_name: "驱动故障标志".into(),
+                group: "驱动".into(),
                 unit: String::new(),
+            },
+            TelemetryDescriptor {
+                channel_id: 204,
+                telemetry_type: TelemetryType::U32,
+                machine_name: "encoder.right_total".into(),
+                display_name: "右编码器总数".into(),
+                group: "编码器".into(),
+                unit: "count".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 205,
+                telemetry_type: TelemetryType::F32,
+                machine_name: "drive.left_wheel_speed_mps".into(),
+                display_name: "左轮速度".into(),
+                group: "驱动".into(),
+                unit: "m/s".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 206,
+                telemetry_type: TelemetryType::F32,
+                machine_name: "drive.right_wheel_speed_mps".into(),
+                display_name: "右轮速度".into(),
+                group: "驱动".into(),
+                unit: "m/s".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 207,
+                telemetry_type: TelemetryType::F32,
+                machine_name: "drive.target_speed_mps".into(),
+                display_name: "目标速度".into(),
+                group: "驱动".into(),
+                unit: "m/s".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 208,
+                telemetry_type: TelemetryType::F32,
+                machine_name: "drive.speed_error_mps".into(),
+                display_name: "速度误差".into(),
+                group: "控制".into(),
+                unit: "m/s".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 209,
+                telemetry_type: TelemetryType::U32,
+                machine_name: "motor.left_pwm".into(),
+                display_name: "左 PWM".into(),
+                group: "电机".into(),
+                unit: "permille".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 210,
+                telemetry_type: TelemetryType::U32,
+                machine_name: "motor.right_pwm".into(),
+                display_name: "右 PWM".into(),
+                group: "电机".into(),
+                unit: "permille".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 211,
+                telemetry_type: TelemetryType::I32,
+                machine_name: "encoder.right_delta".into(),
+                display_name: "右编码器增量".into(),
+                group: "编码器".into(),
+                unit: "count".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 212,
+                telemetry_type: TelemetryType::U32,
+                machine_name: "control.loop_jitter_us".into(),
+                display_name: "控制环抖动".into(),
+                group: "控制".into(),
+                unit: "us".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 213,
+                telemetry_type: TelemetryType::F32,
+                machine_name: "power.battery_voltage".into(),
+                display_name: "电池电压".into(),
+                group: "电源".into(),
+                unit: "V".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 214,
+                telemetry_type: TelemetryType::F32,
+                machine_name: "steering.error_deg".into(),
+                display_name: "转向误差".into(),
+                group: "转向".into(),
+                unit: "deg".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 215,
+                telemetry_type: TelemetryType::U32,
+                machine_name: "system.uptime_ms".into(),
+                display_name: "运行时间".into(),
+                group: "系统".into(),
+                unit: "ms".into(),
             },
         ],
     }
@@ -1029,12 +1231,36 @@ fn telemetry_period_us(sample_rate_hz: u16) -> u64 {
     1_000_000 / u64::from(sample_rate_hz)
 }
 
-fn telemetry_value(descriptor: &TelemetryDescriptor) -> u32 {
-    match descriptor.telemetry_type {
-        TelemetryType::F32 => 1.5f32.to_bits(),
-        TelemetryType::I32 => (-4i32) as u32,
-        TelemetryType::U32 => 8,
-        TelemetryType::Flags32 => 0b101,
+fn telemetry_value(descriptor: &TelemetryDescriptor, timestamp_us: u64) -> u32 {
+    let phase = (timestamp_us % 2_000_000) as f32 / 2_000_000.0;
+    match descriptor.machine_name.as_str() {
+        "drive.speed_mps" => (1.8 + (phase * std::f32::consts::TAU).sin() * 0.4).to_bits(),
+        "encoder.left_delta" => (18 + ((timestamp_us / 2_000) % 5) as i32) as u32,
+        "encoder.right_delta" => (-18 - ((timestamp_us / 2_000) % 5) as i32) as u32,
+        "encoder.left_total" => (timestamp_us / 2_000 * 20) as u32,
+        "encoder.right_total" => (timestamp_us / 2_000 * 19) as u32,
+        "drive.fault_flags" => {
+            if timestamp_us % 5_000_000 < 10_000 {
+                1
+            } else {
+                0
+            }
+        }
+        name if name.starts_with("custom.") => match descriptor.telemetry_type {
+            TelemetryType::F32 => 1.5f32.to_bits(),
+            TelemetryType::I32 => (-4i32) as u32,
+            TelemetryType::U32 => 8,
+            TelemetryType::Flags32 => 0b101,
+        },
+        _ => deterministic_value_for_type(descriptor.telemetry_type, timestamp_us),
+    }
+}
+
+fn deterministic_value_for_type(telemetry_type: TelemetryType, timestamp_us: u64) -> u32 {
+    match telemetry_type {
+        TelemetryType::F32 => (1.0 + (timestamp_us % 1_000_000) as f32 / 1_000_000.0).to_bits(),
+        TelemetryType::I32 => (timestamp_us / 2_000) as i32 as u32,
+        TelemetryType::U32 | TelemetryType::Flags32 => (timestamp_us / 1_000) as u32,
     }
 }
 
@@ -1110,7 +1336,7 @@ fn boolean(
         flags,
         machine_name: machine_name.into(),
         display_name: display_name.into(),
-        group: "Encoder".into(),
+        group: "编码器".into(),
         unit: String::new(),
         default_value: ParamValue::Bool(false),
         constraints: ParamConstraints::None,
