@@ -2,7 +2,9 @@ use dctp_protocol::{
     CapabilityFlags, DeviceManifest, EnumOption, ErrorCode, ErrorPayload, Frame, FrameFlags,
     Heartbeat, Hello, HelloAck, ManifestChunk, ManifestDone, MessageType, ParamConstraints,
     ParamDescriptor, ParamFlags, ParamRead, ParamState, ParamType, ParamValue, ParamWrite,
-    ParamWriteAck, ProtocolError, WireDecode, WireEncode, MANIFEST_SCHEMA_VERSION, MAX_PAYLOAD_LEN,
+    ParamWriteAck, ProtocolError, TelemetryBatch, TelemetryDescriptor, TelemetrySample,
+    TelemetrySubscription, TelemetryType, WireDecode, WireEncode, MANIFEST_SCHEMA_VERSION,
+    MAX_PAYLOAD_LEN,
 };
 
 use crate::{Priority, QueuedFrame, RequestCache, RequestKey};
@@ -54,6 +56,9 @@ pub struct SimDevice {
     parameters: Vec<Parameter>,
     request_cache: RequestCache,
     completed_hello: Option<CompletedHello>,
+    telemetry_subscription: Option<TelemetrySubscription>,
+    next_telemetry_sequence: u16,
+    pending_dropped_telemetry_samples: u16,
 }
 
 impl SimDevice {
@@ -76,6 +81,9 @@ impl SimDevice {
             parameters,
             request_cache: RequestCache::default(),
             completed_hello: None,
+            telemetry_subscription: None,
+            next_telemetry_sequence: 0,
+            pending_dropped_telemetry_samples: 0,
         }
     }
 
@@ -122,7 +130,36 @@ impl SimDevice {
 
     pub fn tick(&mut self, now_ms: u64) -> Vec<QueuedFrame> {
         self.expire_session(now_ms);
-        Vec::new()
+        let Some(session) = &self.session else {
+            return Vec::new();
+        };
+        let Some(subscription) = &self.telemetry_subscription else {
+            return Vec::new();
+        };
+        let values = subscription
+            .channel_ids
+            .iter()
+            .map(|channel_id| telemetry_value(*channel_id))
+            .collect::<Vec<_>>();
+        let first_sample_sequence = self.next_telemetry_sequence;
+        self.next_telemetry_sequence = self.next_telemetry_sequence.wrapping_add(1);
+        let batch = TelemetryBatch {
+            subscription_version: subscription.subscription_version,
+            first_sample_sequence,
+            dropped_samples: std::mem::take(&mut self.pending_dropped_telemetry_samples),
+            base_timestamp_us: u32::try_from(now_ms.saturating_mul(1_000)).unwrap_or(u32::MAX),
+            samples: vec![TelemetrySample { dt_us: 0, values }],
+        };
+        vec![QueuedFrame {
+            priority: Priority::Telemetry,
+            frame: response_frame(
+                MessageType::TelemetryData,
+                first_sample_sequence,
+                session.id,
+                batch.encode().expect("fixed telemetry batch is encodable"),
+                FrameFlags::NONE,
+            ),
+        }]
     }
 
     pub fn open_session(&mut self, client_nonce: u32, now_ms: u64) -> Result<u32, ProtocolError> {
@@ -142,6 +179,9 @@ impl SimDevice {
         });
         self.request_cache.clear();
         self.completed_hello = None;
+        self.telemetry_subscription = None;
+        self.next_telemetry_sequence = 0;
+        self.pending_dropped_telemetry_samples = 0;
         Ok(session_id)
     }
 
@@ -164,6 +204,14 @@ impl SimDevice {
         &self.config.manifest
     }
 
+    /// Records a complete P2 telemetry batch evicted by the transport queue.
+    /// The count is carried in the next emitted telemetry batch.
+    pub fn note_telemetry_drop(&mut self, sample_count: u16) {
+        self.pending_dropped_telemetry_samples = self
+            .pending_dropped_telemetry_samples
+            .saturating_add(sample_count);
+    }
+
     fn expire_session(&mut self, now_ms: u64) {
         let expired = self.session.as_ref().is_some_and(|session| {
             now_ms.saturating_sub(session.last_valid_frame_ms) >= SESSION_EXPIRATION_MS
@@ -172,6 +220,8 @@ impl SimDevice {
             self.session = None;
             self.request_cache.clear();
             self.completed_hello = None;
+            self.telemetry_subscription = None;
+            self.pending_dropped_telemetry_samples = 0;
         }
     }
 
@@ -259,6 +309,7 @@ impl SimDevice {
             MessageType::ManifestRequest => self.handle_manifest_request(request),
             MessageType::ParamRead => self.handle_param_read(request),
             MessageType::ParamWrite => self.handle_param_write(request),
+            MessageType::TelemetrySubscribe => self.handle_telemetry_subscribe(request),
             MessageType::SessionClose => {
                 let response = response_frame(
                     MessageType::SessionClose,
@@ -269,6 +320,7 @@ impl SimDevice {
                 );
                 self.session = None;
                 self.request_cache.clear();
+                self.telemetry_subscription = None;
                 vec![QueuedFrame {
                     priority: Priority::Safety,
                     frame: response,
@@ -439,6 +491,38 @@ impl SimDevice {
                 request.header.sequence,
                 request.header.session_id,
                 ack.encode().expect("accepted parameter ACK is encodable"),
+                FrameFlags::RESPONSE,
+            ),
+        }]
+    }
+
+    fn handle_telemetry_subscribe(&mut self, request: &Frame) -> Vec<QueuedFrame> {
+        let subscription = match TelemetrySubscription::decode(&request.payload) {
+            Ok(subscription) => subscription,
+            Err(_) => {
+                return vec![self.error_response(request, ErrorCode::InvalidLength, String::new())]
+            }
+        };
+        if subscription.channel_ids.iter().any(|channel_id| {
+            !self
+                .config
+                .manifest
+                .telemetry
+                .iter()
+                .any(|descriptor| descriptor.channel_id == *channel_id)
+        }) {
+            return vec![self.error_response(request, ErrorCode::InvalidParamId, String::new())];
+        }
+        self.telemetry_subscription = Some(subscription);
+        self.next_telemetry_sequence = 0;
+        self.pending_dropped_telemetry_samples = 0;
+        vec![QueuedFrame {
+            priority: Priority::Reliable,
+            frame: response_frame(
+                MessageType::TelemetrySubscribeAck,
+                request.header.sequence,
+                request.header.session_id,
+                Vec::new(),
                 FrameFlags::RESPONSE,
             ),
         }]
@@ -714,7 +798,50 @@ fn fixed_manifest() -> DeviceManifest {
                 writable,
             ),
         ],
-        telemetry: Vec::new(),
+        telemetry: vec![
+            TelemetryDescriptor {
+                channel_id: 200,
+                telemetry_type: TelemetryType::F32,
+                machine_name: "drive.speed_mps".into(),
+                display_name: "Vehicle speed".into(),
+                group: "Drive".into(),
+                unit: "m/s".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 201,
+                telemetry_type: TelemetryType::I32,
+                machine_name: "encoder.left_delta".into(),
+                display_name: "Left encoder delta".into(),
+                group: "Encoder".into(),
+                unit: "count".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 202,
+                telemetry_type: TelemetryType::U32,
+                machine_name: "encoder.left_total".into(),
+                display_name: "Left encoder total".into(),
+                group: "Encoder".into(),
+                unit: "count".into(),
+            },
+            TelemetryDescriptor {
+                channel_id: 203,
+                telemetry_type: TelemetryType::Flags32,
+                machine_name: "drive.fault_flags".into(),
+                display_name: "Drive fault flags".into(),
+                group: "Drive".into(),
+                unit: String::new(),
+            },
+        ],
+    }
+}
+
+fn telemetry_value(channel_id: u32) -> u32 {
+    match channel_id {
+        200 => 1.5f32.to_bits(),
+        201 => (-4i32) as u32,
+        202 => 8,
+        203 => 0b101,
+        _ => unreachable!("subscription IDs are checked against the fixed manifest"),
     }
 }
 

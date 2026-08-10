@@ -86,10 +86,15 @@ fn serve_client(
                 for frame in decoder.push(&buffer[..count]).into_iter().flatten() {
                     let responses = lock_device(device)?.handle(frame, elapsed_ms(started_at));
                     for response in responses {
-                        if queue.push(response.priority, response.frame)
-                            == PushOutcome::Backpressure
-                        {
-                            return Err(io::Error::other("P0/P1 transmit queue backpressure"));
+                        let sample_count = telemetry_sample_count(&response.frame);
+                        match queue.push(response.priority, response.frame) {
+                            PushOutcome::Backpressure => {
+                                return Err(io::Error::other("P0/P1 transmit queue backpressure"));
+                            }
+                            PushOutcome::DroppedTelemetry => {
+                                lock_device(device)?.note_telemetry_drop(sample_count);
+                            }
+                            PushOutcome::Enqueued | PushOutcome::DroppedLog => {}
                         }
                     }
                 }
@@ -103,8 +108,15 @@ fn serve_client(
             {
                 let responses = lock_device(device)?.tick(elapsed_ms(started_at));
                 for response in responses {
-                    if queue.push(response.priority, response.frame) == PushOutcome::Backpressure {
-                        return Err(io::Error::other("P0/P1 transmit queue backpressure"));
+                    let sample_count = telemetry_sample_count(&response.frame);
+                    match queue.push(response.priority, response.frame) {
+                        PushOutcome::Backpressure => {
+                            return Err(io::Error::other("P0/P1 transmit queue backpressure"));
+                        }
+                        PushOutcome::DroppedTelemetry => {
+                            lock_device(device)?.note_telemetry_drop(sample_count);
+                        }
+                        PushOutcome::Enqueued | PushOutcome::DroppedLog => {}
                     }
                 }
                 drain_queue(stream, &mut queue)?;
@@ -127,6 +139,14 @@ fn drain_queue(stream: &mut TcpStream, queue: &mut PriorityTxQueue) -> io::Resul
         stream.write_all(&bytes)?;
     }
     Ok(())
+}
+
+fn telemetry_sample_count(frame: &dctp_protocol::Frame) -> u16 {
+    if frame.header.message_type == dctp_protocol::MessageType::TelemetryData {
+        u16::from(frame.payload.get(4).copied().unwrap_or(0))
+    } else {
+        0
+    }
 }
 
 fn elapsed_ms(started_at: Instant) -> u64 {
