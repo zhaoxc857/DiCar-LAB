@@ -206,10 +206,10 @@ Session ID 用于拒绝旧会话残留数据，不作为密码或身份凭据。
 
 ### 6.4 超时
 
-- 普通读写命令：300 ms，最多重试 3 次。
-- Manifest 分片：500 ms，最多重试 3 次。
-- 参数 Flash 固化：3000 ms，最多重试 2 次，沿用原 Sequence。
-- 烧录准备：1000 ms，最多重试 2 次。
+- 普通读写命令：300 ms，初次发送后最多重试 3 次，最多发送 4 次。
+- Manifest 分片：500 ms，初次发送后最多重试 3 次，最多发送 4 次。
+- 参数 Flash 固化：3000 ms，初次发送后最多重试 2 次，最多发送 3 次，沿用原 Sequence。
+- 烧录准备：1000 ms，初次发送后最多重试 2 次，最多发送 3 次。
 - 心跳间隔：500 ms。
 - 会话和协作租约失效：连续 3000 ms 无有效帧。
 
@@ -255,6 +255,8 @@ Manifest 字符串统一使用 UTF-8。机器名最长 48 字节、显示名最�
 参数值无论因 DCTP 写入还是固件内部逻辑而变化，设备都递增 `value_revision`。版本回绕按模 `2^32` 处理；一次会话内只判断相等，不比较大小。
 
 `PARAM_VALUE` Payload 固定包含 `param_id: u32`、`value_revision: u32`、带类型标签的 RAM 运行值、`has_persisted_value: u8`，以及在标记为 `1` 时紧随其后的带类型标签 Flash 固化值。可固化参数必须返回 `has_persisted_value = 1`；非持久化参数返回 `0` 且不附加第二个值。App 不得把首次读到的 RAM 值推测为 Flash 值。
+
+本协议此时仍为首发前 DCTP v1，尚无已部署固件兼容义务；RAM/Flash 双值和带 Generation 的 Commit ACK 是 v1 首发 schema 的定稿修订。解码器不得把旧的短 Payload 当作隐式兼容格式。`PARAM_VALUE` 与 `PARAM_COMMIT_ACK` 必须各有独立黄金帧，连同既有向量由生成器逐字节校验。
 
 ### 8.3 PARAM_WRITE
 

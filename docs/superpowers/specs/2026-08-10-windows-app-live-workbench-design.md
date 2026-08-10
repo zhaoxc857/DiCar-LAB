@@ -72,7 +72,7 @@
 - 通过一个类型化 Tauri Channel 把有序 CoreEvent 批量发给 WebView。
 - 管理窗口关闭前的未固化确认。
 
-Tauri 层不复制 DCTP 编解码，不直接解释参数 Payload。普通 Tauri Event 不承载遥测；前端通过 open_core_channel 命令注册 Channel<BridgeEvent>，命令返回后由同一 Channel 顺序传送快照、操作结果和遥测批次。
+Tauri 层不复制 DCTP 编解码，不直接解释参数 Payload。普通 Tauri Event 不承载遥测；前端通过 open_core_channel 命令注册 Channel<BridgeEvent>，命令返回后由同一 Channel 顺序传送快照、操作结果、遥测批次和原生窗口关闭请求。窗口事件属于 BridgeEvent 而非 CoreEvent，AppActor 保持与窗口系统无关。AppState 的单一 FrontendEventSequencer 在同一互斥临界区内分配 eventIndex 并发送 Channel 消息；Actor 转发器和窗口处理器都只能通过该入口发布，因此前端实际接收顺序严格单调。
 
 ### 4.2 核心接口
 
@@ -92,6 +92,7 @@ AppActor 接收以下命令：
 - WriteParameter
 - CommitParameters
 - RevertAllPendingChanges
+- UndoLastConfirmedChange
 - SetTelemetrySubscription
 - PauseTelemetry
 - ResumeTelemetry
@@ -108,7 +109,7 @@ AppActor 发出以下事件：
 
 所有队列有固定容量；快照事件可以合并为最新值，可靠操作结果不能被遥测挤掉。
 
-会话严格使用 DCTP v1 时序：500 ms 心跳；连续 3000 ms 无有效帧则失效；普通读写 300 ms 超时并最多重试 3 次；Manifest 分片 500 ms 并最多重试 3 次；固化 3000 ms 并最多重试 2 次。所有重试复用原 Sequence。
+会话严格使用 DCTP v1 时序：500 ms 心跳；连续 3000 ms 无有效帧则失效；普通读写 300 ms 超时并在初次发送后最多重试 3 次（最多发送 4 次）；Manifest 分片 500 ms 并在初次发送后最多重试 3 次（最多发送 4 次）；固化 3000 ms 并在初次发送后最多重试 2 次（最多发送 3 次）。所有重试复用原 Sequence。
 
 ## 5. 前端结构
 
@@ -130,7 +131,9 @@ AppActor 发出以下事件：
 
 组件只能通过 DesktopBridge 接口调用后端。tauriBridge、mockBridge 都实现该接口，测试无需启动桌面 WebView。
 
-DesktopBridge 只暴露 connect、disconnect、writeParameter、commitParameters、revertAll、setTelemetrySubscription、setPaused、selectAccessProfile、getSnapshot 和 subscribe。subscribe 返回解除订阅函数；Tauri 实现使用 Channel，Mock 实现使用进程内有界发布器。
+DesktopBridge 只暴露 connect、disconnect、writeParameter、commitParameters、revertAll、undoLast、setTelemetrySubscription、setPaused、addMarker、selectAccessProfile、resolveWindowClose、getSnapshot 和 subscribe。subscribe 返回解除订阅函数；Tauri 实现使用 Channel，Mock 实现使用进程内有界发布器。
+
+原生窗口收到 CloseRequested 时，若无 dirty 参数则正常关闭；否则 Tauri 必须 prevent_close 并通过 Channel 发出带 requestId 的 WindowCloseRequested。前端只可用三种决定解析该 requestId：取消；断开并把未确认状态保留为 Unknown 后关闭；在 READY 状态先逐项 Revision-aware 回退、全部 ACK 后断开并关闭。过期/重复 requestId 或回退失败都不得关闭窗口。
 
 ## 6. B 型菜单主页
 
