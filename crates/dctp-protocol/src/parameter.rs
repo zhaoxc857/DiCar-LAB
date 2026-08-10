@@ -86,6 +86,13 @@ impl ParamValue {
             ParamType::Enum => Ok(Self::Enum(reader.read_u32()? as i32)),
         }
     }
+
+    const fn encoded_tagged_len(&self) -> usize {
+        match self {
+            Self::Bool(_) => 2,
+            Self::I32(_) | Self::U32(_) | Self::F32(_) | Self::Enum(_) => 5,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -184,6 +191,46 @@ impl ParamDescriptor {
                 Ok(())
             }
         }
+    }
+
+    pub(crate) fn encoded_len(&self) -> Result<usize, ProtocolError> {
+        self.validate()?;
+        let mut len = 6usize;
+        for value in [
+            &self.machine_name,
+            &self.display_name,
+            &self.group,
+            &self.unit,
+        ] {
+            len = len
+                .checked_add(1)
+                .and_then(|value_len| value_len.checked_add(value.len()))
+                .ok_or(ProtocolError::InvalidLength)?;
+        }
+        len = len
+            .checked_add(self.default_value.encoded_tagged_len())
+            .and_then(|value_len| value_len.checked_add(1))
+            .ok_or(ProtocolError::InvalidLength)?;
+        match &self.constraints {
+            ParamConstraints::None => {}
+            ParamConstraints::Numeric { min, max, step } => {
+                for value in [min, max, step] {
+                    len = len
+                        .checked_add(value.encoded_tagged_len())
+                        .ok_or(ProtocolError::InvalidLength)?;
+                }
+            }
+            ParamConstraints::Enum { options } => {
+                len = len.checked_add(1).ok_or(ProtocolError::InvalidLength)?;
+                for option in options {
+                    len = len
+                        .checked_add(5)
+                        .and_then(|value_len| value_len.checked_add(option.label.len()))
+                        .ok_or(ProtocolError::InvalidLength)?;
+                }
+            }
+        }
+        Ok(len)
     }
 }
 
