@@ -367,10 +367,19 @@ fn session_expires_at_exactly_3000_ms_over_the_wire() {
     let mut harness = WireHarness::new();
     let session = harness.hello(0xABC0).unwrap();
 
-    harness.set_now_ms(2_999);
-    assert!(harness.heartbeat(session).is_ok());
-    harness.set_now_ms(6_000);
-    assert!(harness.heartbeat(session).is_err());
+    let first_heartbeat_at_ms = 3_000;
+    harness.set_now_ms(first_heartbeat_at_ms - 1);
+    assert!(
+        harness.heartbeat(session).is_ok(),
+        "the 2999 ms boundary must keep the session valid"
+    );
+
+    let exact_expiration_at_ms = first_heartbeat_at_ms + 3_000;
+    harness.set_now_ms(exact_expiration_at_ms - 1);
+    assert!(
+        harness.heartbeat(session).is_err(),
+        "the exactly 3000 ms boundary must expire the session"
+    );
 }
 
 #[test]
