@@ -12,6 +12,9 @@ use dctp_sim::{PriorityTxQueue, PushOutcome, SimConfig, SimDevice};
 
 const DEFAULT_LISTEN_ADDRESS: &str = "127.0.0.1:7100";
 const CLIENT_REJECTION: &[u8] = b"DCTP simulator rejected connection: only one client is allowed\n";
+const CLIENT_POLL_INTERVAL: Duration = Duration::from_millis(1);
+const MAX_READS_PER_POLL: usize = 8;
+const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
 fn main() -> ExitCode {
     match run() {
@@ -73,57 +76,65 @@ fn serve_client(
     device: &Arc<Mutex<SimDevice>>,
     started_at: Instant,
 ) -> io::Result<()> {
-    stream.set_read_timeout(Some(Duration::from_millis(50)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+    let result = serve_client_loop(stream, device, started_at);
+    let reset_result = lock_device(device).map(|mut device| device.disconnect());
+    match result {
+        Err(error) => Err(error),
+        Ok(()) => reset_result,
+    }
+}
+
+fn serve_client_loop(
+    stream: &mut TcpStream,
+    device: &Arc<Mutex<SimDevice>>,
+    started_at: Instant,
+) -> io::Result<()> {
+    stream.set_nonblocking(true)?;
     let mut decoder = StreamDecoder::new();
     let mut queue = PriorityTxQueue::default();
     let mut buffer = [0u8; 1_100];
 
     loop {
-        match stream.read(&mut buffer) {
-            Ok(0) => return Ok(()),
-            Ok(count) => {
-                for frame in decoder.push(&buffer[..count]).into_iter().flatten() {
-                    let responses = lock_device(device)?.handle(frame, elapsed_ms(started_at));
-                    for response in responses {
-                        let sample_count = telemetry_sample_count(&response.frame);
-                        match queue.push(response.priority, response.frame) {
-                            PushOutcome::Backpressure => {
-                                return Err(io::Error::other("P0/P1 transmit queue backpressure"));
-                            }
-                            PushOutcome::DroppedTelemetry => {
-                                lock_device(device)?.note_telemetry_drop(sample_count);
-                            }
-                            PushOutcome::Enqueued | PushOutcome::DroppedLog => {}
-                        }
+        for _ in 0..MAX_READS_PER_POLL {
+            match stream.read(&mut buffer) {
+                Ok(0) => return Ok(()),
+                Ok(count) => {
+                    for frame in decoder.push(&buffer[..count]).into_iter().flatten() {
+                        let responses = lock_device(device)?.handle(frame, elapsed_ms(started_at));
+                        enqueue_responses(&mut queue, device, responses)?;
                     }
                 }
-                drain_queue(stream, &mut queue)?;
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
             }
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                ) =>
-            {
-                let responses = lock_device(device)?.tick(elapsed_ms(started_at));
-                for response in responses {
-                    let sample_count = telemetry_sample_count(&response.frame);
-                    match queue.push(response.priority, response.frame) {
-                        PushOutcome::Backpressure => {
-                            return Err(io::Error::other("P0/P1 transmit queue backpressure"));
-                        }
-                        PushOutcome::DroppedTelemetry => {
-                            lock_device(device)?.note_telemetry_drop(sample_count);
-                        }
-                        PushOutcome::Enqueued | PushOutcome::DroppedLog => {}
-                    }
-                }
-                drain_queue(stream, &mut queue)?;
+        }
+
+        let responses = lock_device(device)?.tick(elapsed_ms(started_at));
+        enqueue_responses(&mut queue, device, responses)?;
+        drain_queue(stream, &mut queue)?;
+        thread::sleep(CLIENT_POLL_INTERVAL);
+    }
+}
+
+fn enqueue_responses(
+    queue: &mut PriorityTxQueue,
+    device: &Arc<Mutex<SimDevice>>,
+    responses: Vec<dctp_sim::QueuedFrame>,
+) -> io::Result<()> {
+    for response in responses {
+        let sample_count = telemetry_sample_count(&response.frame);
+        match queue.push(response.priority, response.frame) {
+            PushOutcome::Backpressure => {
+                return Err(io::Error::other("P0/P1 transmit queue backpressure"));
             }
-            Err(error) => return Err(error),
+            PushOutcome::DroppedTelemetry => {
+                lock_device(device)?.note_telemetry_drop(sample_count);
+            }
+            PushOutcome::Enqueued | PushOutcome::DroppedLog => {}
         }
     }
+    Ok(())
 }
 
 fn lock_device(device: &Arc<Mutex<SimDevice>>) -> io::Result<std::sync::MutexGuard<'_, SimDevice>> {
@@ -136,7 +147,27 @@ fn drain_queue(stream: &mut TcpStream, queue: &mut PriorityTxQueue) -> io::Resul
     while let Some(frame) = queue.pop() {
         let bytes = encode_frame(&frame)
             .map_err(|error| io::Error::other(format!("frame encode failed: {error:?}")))?;
-        stream.write_all(&bytes)?;
+        write_all_nonblocking(stream, &bytes)?;
+    }
+    Ok(())
+}
+
+fn write_all_nonblocking(stream: &mut TcpStream, bytes: &[u8]) -> io::Result<()> {
+    let deadline = Instant::now() + WRITE_TIMEOUT;
+    let mut written = 0;
+    while written < bytes.len() {
+        match stream.write(&bytes[written..]) {
+            Ok(0) => return Err(io::Error::from(io::ErrorKind::WriteZero)),
+            Ok(count) => written += count,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return Err(io::Error::from(io::ErrorKind::TimedOut));
+                }
+                thread::sleep(CLIENT_POLL_INTERVAL);
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
     }
     Ok(())
 }

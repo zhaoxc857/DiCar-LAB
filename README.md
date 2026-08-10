@@ -9,6 +9,7 @@ Developer commands:
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo run -p dctp-sim -- --help
 cargo run -p dctp-sim -- --listen 127.0.0.1:7100
 cargo run -p dctp-sim --bin generate_vectors -- --check
 ```

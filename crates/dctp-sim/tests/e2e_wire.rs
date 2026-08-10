@@ -155,6 +155,10 @@ impl WireHarness {
         self.now_ms = now_ms;
     }
 
+    fn advance_ms(&mut self, elapsed_ms: u64) {
+        self.now_ms = self.now_ms.saturating_add(elapsed_ms);
+    }
+
     fn queue_device_tick(&mut self) -> Result<(), ProtocolError> {
         let responses = self.device.tick(self.now_ms);
         self.enqueue_device_responses(responses)
@@ -402,9 +406,10 @@ fn mixed_telemetry_reports_drops_and_sequence_gap_after_queue_pressure() {
         .subscribe(session, vec![200, 201, 202, 203])
         .unwrap();
 
-    harness.queue_device_tick().unwrap();
-    harness.queue_device_tick().unwrap();
-    harness.queue_device_tick().unwrap();
+    for _ in 0..3 {
+        harness.advance_ms(10);
+        harness.queue_device_tick().unwrap();
+    }
     let responses = harness.drain_device_packets().unwrap();
     assert_eq!(responses.len(), 1);
     assert_eq!(responses[0].header.message_type, MessageType::TelemetryData);

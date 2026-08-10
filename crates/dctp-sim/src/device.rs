@@ -4,13 +4,15 @@ use dctp_protocol::{
     ParamDescriptor, ParamFlags, ParamRead, ParamState, ParamType, ParamValue, ParamWrite,
     ParamWriteAck, ProtocolError, TelemetryBatch, TelemetryDescriptor, TelemetrySample,
     TelemetrySubscription, TelemetryType, WireDecode, WireEncode, MANIFEST_SCHEMA_VERSION,
-    MAX_PAYLOAD_LEN,
+    MAX_PAYLOAD_LEN, MAX_TELEMETRY_SAMPLES,
 };
 
 use crate::{Priority, QueuedFrame, RequestCache, RequestKey};
 
 pub const SESSION_EXPIRATION_MS: u64 = 3_000;
-const MANIFEST_CHUNK_DATA_LEN: usize = 900;
+const HELLO_ACK_PAYLOAD_LEN: u16 = 46;
+const MANIFEST_CHUNK_PREFIX_LEN: usize = 12;
+const TELEMETRY_BATCH_PREFIX_LEN: usize = 12;
 
 #[derive(Clone, Debug)]
 pub struct SimConfig {
@@ -33,6 +35,7 @@ impl Default for SimConfig {
 struct Session {
     id: u32,
     last_valid_frame_ms: u64,
+    max_payload: u16,
 }
 
 #[derive(Clone, Debug)]
@@ -48,6 +51,12 @@ struct CompletedHello {
     response: Frame,
 }
 
+#[derive(Clone, Debug)]
+struct CompletedClose {
+    request: Frame,
+    response: Frame,
+}
+
 #[derive(Debug)]
 pub struct SimDevice {
     config: SimConfig,
@@ -56,7 +65,9 @@ pub struct SimDevice {
     parameters: Vec<Parameter>,
     request_cache: RequestCache,
     completed_hello: Option<CompletedHello>,
+    completed_close: Option<CompletedClose>,
     telemetry_subscription: Option<TelemetrySubscription>,
+    next_telemetry_at_us: Option<u64>,
     next_telemetry_sequence: u16,
     pending_dropped_telemetry_samples: u16,
 }
@@ -81,7 +92,9 @@ impl SimDevice {
             parameters,
             request_cache: RequestCache::default(),
             completed_hello: None,
+            completed_close: None,
             telemetry_subscription: None,
+            next_telemetry_at_us: None,
             next_telemetry_sequence: 0,
             pending_dropped_telemetry_samples: 0,
         }
@@ -98,8 +111,24 @@ impl SimDevice {
             }
             return self.handle_hello(request, now_ms);
         }
+        if request.header.message_type == MessageType::SessionClose {
+            if let Some(response) = self.replay_completed_close(&request) {
+                return vec![QueuedFrame {
+                    priority: Priority::Safety,
+                    frame: response,
+                }];
+            }
+        }
         if self.validate_session(request.header.session_id).is_err() {
             return vec![self.error_response(&request, ErrorCode::InvalidSession, String::new())];
+        }
+        let negotiated_max_payload = self
+            .session
+            .as_ref()
+            .map(|session| session.max_payload)
+            .unwrap_or(MAX_PAYLOAD_LEN as u16);
+        if request.payload.len() > usize::from(negotiated_max_payload) {
+            return vec![self.error_response(&request, ErrorCode::InvalidLength, String::new())];
         }
 
         if let Some(session) = &mut self.session {
@@ -121,8 +150,18 @@ impl SimDevice {
             }
         }
 
-        let responses = self.dispatch(&request);
-        if reliable && responses.len() == 1 {
+        let mut responses = self.dispatch(&request, now_ms);
+        if responses
+            .iter()
+            .any(|response| response.frame.payload.len() > usize::from(negotiated_max_payload))
+        {
+            responses =
+                vec![self.error_response(&request, ErrorCode::InternalError, String::new())];
+        }
+        if reliable
+            && request.header.message_type != MessageType::SessionClose
+            && responses.len() == 1
+        {
             self.request_cache.insert(key, responses[0].frame.clone());
         }
         responses
@@ -130,39 +169,115 @@ impl SimDevice {
 
     pub fn tick(&mut self, now_ms: u64) -> Vec<QueuedFrame> {
         self.expire_session(now_ms);
-        let Some(session) = &self.session else {
+        let Some((session_id, max_payload)) = self
+            .session
+            .as_ref()
+            .map(|session| (session.id, session.max_payload))
+        else {
             return Vec::new();
         };
-        let Some(subscription) = &self.telemetry_subscription else {
+        let Some(subscription) = self.telemetry_subscription.clone() else {
             return Vec::new();
         };
+        let Some(next_telemetry_at_us) = self.next_telemetry_at_us else {
+            return Vec::new();
+        };
+        let now_us = now_ms.saturating_mul(1_000);
+        if now_us < next_telemetry_at_us {
+            return Vec::new();
+        }
+        let period_us = telemetry_period_us(subscription.sample_rate_hz);
+        let due_samples = now_us
+            .saturating_sub(next_telemetry_at_us)
+            .checked_div(period_us)
+            .unwrap_or(0)
+            .saturating_add(1);
         let values = subscription
             .channel_ids
             .iter()
-            .map(|channel_id| telemetry_value(*channel_id))
-            .collect::<Vec<_>>();
-        let first_sample_sequence = self.next_telemetry_sequence;
-        self.next_telemetry_sequence = self.next_telemetry_sequence.wrapping_add(1);
+            .map(|channel_id| {
+                self.config
+                    .manifest
+                    .telemetry
+                    .iter()
+                    .find(|descriptor| descriptor.channel_id == *channel_id)
+                    .map(telemetry_value)
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(values) = values else {
+            self.clear_telemetry_state();
+            return Vec::new();
+        };
+        let sample_payload_len = 2usize.saturating_add(values.len().saturating_mul(4));
+        let payload_sample_capacity = usize::from(max_payload)
+            .saturating_sub(TELEMETRY_BATCH_PREFIX_LEN)
+            .checked_div(sample_payload_len)
+            .unwrap_or(0);
+        let delta_sample_capacity = if period_us <= u64::from(u16::MAX) {
+            MAX_TELEMETRY_SAMPLES
+        } else {
+            1
+        };
+        let sample_capacity = payload_sample_capacity
+            .min(delta_sample_capacity)
+            .min(MAX_TELEMETRY_SAMPLES);
+        if sample_capacity == 0 {
+            self.clear_telemetry_state();
+            return Vec::new();
+        }
+        let emitted_samples = due_samples.min(sample_capacity as u64);
+        let skipped_samples = due_samples.saturating_sub(emitted_samples);
+        self.note_telemetry_drop(u16::try_from(skipped_samples).unwrap_or(u16::MAX));
+        let first_sample_sequence = self
+            .next_telemetry_sequence
+            .wrapping_add(skipped_samples as u16);
+        self.next_telemetry_sequence = first_sample_sequence.wrapping_add(emitted_samples as u16);
+        let base_timestamp_us =
+            next_telemetry_at_us.saturating_add(skipped_samples.saturating_mul(period_us)) as u32;
+        self.next_telemetry_at_us =
+            Some(next_telemetry_at_us.saturating_add(due_samples.saturating_mul(period_us)));
+        let dt_us = u16::try_from(period_us).unwrap_or(0);
+        let samples = (0..emitted_samples)
+            .map(|index| TelemetrySample {
+                dt_us: if index == 0 { 0 } else { dt_us },
+                values: values.clone(),
+            })
+            .collect();
         let batch = TelemetryBatch {
             subscription_version: subscription.subscription_version,
             first_sample_sequence,
             dropped_samples: std::mem::take(&mut self.pending_dropped_telemetry_samples),
-            base_timestamp_us: u32::try_from(now_ms.saturating_mul(1_000)).unwrap_or(u32::MAX),
-            samples: vec![TelemetrySample { dt_us: 0, values }],
+            base_timestamp_us,
+            samples,
         };
+        let Ok(payload) = batch.encode() else {
+            return Vec::new();
+        };
+        if payload.len() > usize::from(max_payload) {
+            return Vec::new();
+        }
         vec![QueuedFrame {
             priority: Priority::Telemetry,
             frame: response_frame(
                 MessageType::TelemetryData,
                 first_sample_sequence,
-                session.id,
-                batch.encode().expect("fixed telemetry batch is encodable"),
+                session_id,
+                payload,
                 FrameFlags::NONE,
             ),
         }]
     }
 
     pub fn open_session(&mut self, client_nonce: u32, now_ms: u64) -> Result<u32, ProtocolError> {
+        self.open_session_with_max_payload(client_nonce, now_ms, MAX_PAYLOAD_LEN as u16)
+    }
+
+    fn open_session_with_max_payload(
+        &mut self,
+        client_nonce: u32,
+        now_ms: u64,
+        max_payload: u16,
+    ) -> Result<u32, ProtocolError> {
         let previous = self.session.as_ref().map(|session| session.id);
         let session_id = loop {
             self.session_counter = self.session_counter.wrapping_add(1);
@@ -176,13 +291,20 @@ impl SimDevice {
         self.session = Some(Session {
             id: session_id,
             last_valid_frame_ms: now_ms,
+            max_payload,
         });
         self.request_cache.clear();
         self.completed_hello = None;
-        self.telemetry_subscription = None;
-        self.next_telemetry_sequence = 0;
-        self.pending_dropped_telemetry_samples = 0;
+        self.completed_close = None;
+        self.clear_telemetry_state();
         Ok(session_id)
+    }
+
+    /// Clears transport and Session ownership after a client disconnects while
+    /// preserving the currently accepted RAM parameter values and Revisions.
+    pub fn disconnect(&mut self) {
+        self.clear_current_session();
+        self.completed_close = None;
     }
 
     pub fn validate_session(&self, session_id: u32) -> Result<(), ProtocolError> {
@@ -217,11 +339,8 @@ impl SimDevice {
             now_ms.saturating_sub(session.last_valid_frame_ms) >= SESSION_EXPIRATION_MS
         });
         if expired {
-            self.session = None;
-            self.request_cache.clear();
-            self.completed_hello = None;
-            self.telemetry_subscription = None;
-            self.pending_dropped_telemetry_samples = 0;
+            self.clear_current_session();
+            self.completed_close = None;
         }
     }
 
@@ -237,6 +356,16 @@ impl SimDevice {
         }
         if let Some(session) = &mut self.session {
             session.last_valid_frame_ms = now_ms;
+        }
+        Some(completed.response.clone())
+    }
+
+    fn replay_completed_close(&self, request: &Frame) -> Option<Frame> {
+        let completed = self.completed_close.as_ref()?;
+        if completed.request != *request
+            || request.header.flags.bits() & FrameFlags::ACK_REQUIRED.bits() == 0
+        {
+            return None;
         }
         Some(completed.response.clone())
     }
@@ -258,7 +387,15 @@ impl SimDevice {
                 String::new(),
             )];
         }
-        let session_id = match self.open_session(hello.client_nonce, now_ms) {
+        if hello.max_payload < HELLO_ACK_PAYLOAD_LEN {
+            return vec![self.error_response(&request, ErrorCode::InvalidLength, String::new())];
+        }
+        let negotiated_max_payload = hello.max_payload.min(MAX_PAYLOAD_LEN as u16);
+        let session_id = match self.open_session_with_max_payload(
+            hello.client_nonce,
+            now_ms,
+            negotiated_max_payload,
+        ) {
             Ok(session_id) => session_id,
             Err(_) => {
                 return vec![self.error_response(&request, ErrorCode::InternalError, String::new())]
@@ -280,9 +417,9 @@ impl SimDevice {
             sdk_major: 1,
             sdk_minor: 0,
             sdk_patch: 0,
-            capabilities: CapabilityFlags::PARAMETERS,
+            capabilities: CapabilityFlags::PARAMETERS | CapabilityFlags::TELEMETRY,
             manifest_crc32,
-            max_payload: hello.max_payload.min(MAX_PAYLOAD_LEN as u16),
+            max_payload: negotiated_max_payload,
         };
         let response = response_frame(
             MessageType::HelloAck,
@@ -303,14 +440,22 @@ impl SimDevice {
         }]
     }
 
-    fn dispatch(&mut self, request: &Frame) -> Vec<QueuedFrame> {
+    fn dispatch(&mut self, request: &Frame, now_ms: u64) -> Vec<QueuedFrame> {
         match request.header.message_type {
             MessageType::Heartbeat => self.handle_heartbeat(request),
             MessageType::ManifestRequest => self.handle_manifest_request(request),
             MessageType::ParamRead => self.handle_param_read(request),
             MessageType::ParamWrite => self.handle_param_write(request),
-            MessageType::TelemetrySubscribe => self.handle_telemetry_subscribe(request),
+            MessageType::TelemetrySubscribe => self.handle_telemetry_subscribe(request, now_ms),
+            MessageType::TelemetryStop => self.handle_telemetry_stop(request),
             MessageType::SessionClose => {
+                if !request.payload.is_empty() {
+                    return vec![self.error_response(
+                        request,
+                        ErrorCode::InvalidLength,
+                        String::new(),
+                    )];
+                }
                 let response = response_frame(
                     MessageType::SessionClose,
                     request.header.sequence,
@@ -318,9 +463,15 @@ impl SimDevice {
                     Vec::new(),
                     FrameFlags::RESPONSE,
                 );
-                self.session = None;
-                self.request_cache.clear();
-                self.telemetry_subscription = None;
+                let completed_close = (request.header.flags.bits()
+                    & FrameFlags::ACK_REQUIRED.bits()
+                    != 0)
+                    .then(|| CompletedClose {
+                        request: request.clone(),
+                        response: response.clone(),
+                    });
+                self.clear_current_session();
+                self.completed_close = completed_close;
                 vec![QueuedFrame {
                     priority: Priority::Safety,
                     frame: response,
@@ -365,12 +516,18 @@ impl SimDevice {
                 return vec![self.error_response(request, ErrorCode::InternalError, String::new())]
             }
         };
+        let chunk_data_len = self
+            .session
+            .as_ref()
+            .map(|session| usize::from(session.max_payload))
+            .unwrap_or(MAX_PAYLOAD_LEN)
+            .saturating_sub(MANIFEST_CHUNK_PREFIX_LEN);
         let mut responses = Vec::new();
-        for (chunk_index, data) in bytes.chunks(MANIFEST_CHUNK_DATA_LEN).enumerate() {
+        for (chunk_index, data) in bytes.chunks(chunk_data_len).enumerate() {
             let chunk = ManifestChunk {
                 manifest_crc32: crc32,
                 total_len: bytes.len() as u32,
-                offset: (chunk_index * MANIFEST_CHUNK_DATA_LEN) as u32,
+                offset: (chunk_index * chunk_data_len) as u32,
                 data: data.to_vec(),
             };
             responses.push(QueuedFrame {
@@ -496,7 +653,7 @@ impl SimDevice {
         }]
     }
 
-    fn handle_telemetry_subscribe(&mut self, request: &Frame) -> Vec<QueuedFrame> {
+    fn handle_telemetry_subscribe(&mut self, request: &Frame, now_ms: u64) -> Vec<QueuedFrame> {
         let subscription = match TelemetrySubscription::decode(&request.payload) {
             Ok(subscription) => subscription,
             Err(_) => {
@@ -513,6 +670,8 @@ impl SimDevice {
         }) {
             return vec![self.error_response(request, ErrorCode::InvalidParamId, String::new())];
         }
+        let period_us = telemetry_period_us(subscription.sample_rate_hz);
+        self.next_telemetry_at_us = Some(now_ms.saturating_mul(1_000).saturating_add(period_us));
         self.telemetry_subscription = Some(subscription);
         self.next_telemetry_sequence = 0;
         self.pending_dropped_telemetry_samples = 0;
@@ -526,6 +685,37 @@ impl SimDevice {
                 FrameFlags::RESPONSE,
             ),
         }]
+    }
+
+    fn handle_telemetry_stop(&mut self, request: &Frame) -> Vec<QueuedFrame> {
+        if !request.payload.is_empty() {
+            return vec![self.error_response(request, ErrorCode::InvalidLength, String::new())];
+        }
+        self.clear_telemetry_state();
+        vec![QueuedFrame {
+            priority: Priority::Reliable,
+            frame: response_frame(
+                MessageType::TelemetryStop,
+                request.header.sequence,
+                request.header.session_id,
+                Vec::new(),
+                FrameFlags::RESPONSE,
+            ),
+        }]
+    }
+
+    fn clear_current_session(&mut self) {
+        self.session = None;
+        self.request_cache.clear();
+        self.completed_hello = None;
+        self.clear_telemetry_state();
+    }
+
+    fn clear_telemetry_state(&mut self) {
+        self.telemetry_subscription = None;
+        self.next_telemetry_at_us = None;
+        self.next_telemetry_sequence = 0;
+        self.pending_dropped_telemetry_samples = 0;
     }
 
     fn error_response(
@@ -835,13 +1025,16 @@ fn fixed_manifest() -> DeviceManifest {
     }
 }
 
-fn telemetry_value(channel_id: u32) -> u32 {
-    match channel_id {
-        200 => 1.5f32.to_bits(),
-        201 => (-4i32) as u32,
-        202 => 8,
-        203 => 0b101,
-        _ => unreachable!("subscription IDs are checked against the fixed manifest"),
+fn telemetry_period_us(sample_rate_hz: u16) -> u64 {
+    1_000_000 / u64::from(sample_rate_hz)
+}
+
+fn telemetry_value(descriptor: &TelemetryDescriptor) -> u32 {
+    match descriptor.telemetry_type {
+        TelemetryType::F32 => 1.5f32.to_bits(),
+        TelemetryType::I32 => (-4i32) as u32,
+        TelemetryType::U32 => 8,
+        TelemetryType::Flags32 => 0b101,
     }
 }
 
