@@ -27,6 +27,8 @@
 
 - Tauri 2 + React + TypeScript + Vite 的 Windows 桌面应用骨架。
 - 独立 Rust dicar-app-core crate，不能依赖 Tauri UI。
+- 先补齐 DCTP v1 的持久化状态闭环：PARAM_VALUE 返回 RAM 与可选 Flash 值，PARAM_COMMIT_ACK 返回 CRC32 与 Storage Generation，模拟器真实执行幂等 Commit。
+- 把默认模拟器 Manifest 扩充到至少 16 个候选遥测通道，并为 PID、编码器原始计数、左右轮速、车速、误差、PWM 和故障 flags 生成随设备时间变化的确定性样本，保证 8 通道工作台不是常量假波形。
 - 基于 std::net::TcpStream 的模拟器 Transport。
 - DCTP HELLO、Manifest、参数全量读取、心跳、超时、断开和重新连接。
 - B 型主页：项目、车辆、连接状态、固件、参数数、遥测通道数、最近固化摘要。
@@ -257,6 +259,8 @@ UI 更新上限 30 Hz。Canvas 绘制不得阻塞参数 ACK 展示或输入反�
 
 Rust 单元与集成测试：
 
+- PARAM_VALUE 的 RAM/Flash 双值、非持久化空值、Commit Generation 单次递增、重复 Commit 幂等和存储失败保持旧 Flash 值。
+- 默认模拟器至少 16 个候选通道，任意 8 通道可订阅，连续样本随设备时间变化且同一时间输入可重复。
 - TcpTransport 的连接、EOF、读取超时、写入和关闭。
 - ProtocolSession 的 HELLO、Manifest、参数读取、心跳、断开和重连。
 - 参数范围、类型、Revision 冲突、每参数单在途和最新值合并。

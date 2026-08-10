@@ -254,6 +254,8 @@ Manifest 字符串统一使用 UTF-8。机器名最长 48 字节、显示名最�
 
 参数值无论因 DCTP 写入还是固件内部逻辑而变化，设备都递增 `value_revision`。版本回绕按模 `2^32` 处理；一次会话内只判断相等，不比较大小。
 
+`PARAM_VALUE` Payload 固定包含 `param_id: u32`、`value_revision: u32`、带类型标签的 RAM 运行值、`has_persisted_value: u8`，以及在标记为 `1` 时紧随其后的带类型标签 Flash 固化值。可固化参数必须返回 `has_persisted_value = 1`；非持久化参数返回 `0` 且不附加第二个值。App 不得把首次读到的 RAM 值推测为 Flash 值。
+
 ### 8.3 PARAM_WRITE
 
 Payload 包含：
@@ -281,6 +283,8 @@ Payload 包含：
 - 整体 CRC32
 
 写入非活动槽、校验读回成功后才切换有效 Generation。写入失败时保留上一槽，RAM 值可以继续运行，但 App 必须保持“未固化”状态。
+
+成功的 `PARAM_COMMIT_ACK` Payload 返回请求的 `canonical_crc32: u32` 和切换后的 `storage_generation: u32`。只有在持久化写入与读回校验均成功后，设备才更新各参数的 Flash 固化值并递增 Generation；同一 Sequence 的重复请求必须重放相同 ACK，不能再次写入或再次递增。
 
 ## 9. 编码器参数与遥测
 
@@ -438,6 +442,7 @@ App 必须分别显示 PPR、倍频和 CPR，不使用含糊的“编码器线�
 - 随机噪声、截断、重复分隔符、错误 Length 和 CRC 的解析器模糊测试。
 - Sequence 回绕、重复命令、32 项结果缓存和旧 Session 拒绝。
 - 所有参数类型、范围边界、Revision 冲突、连续滑动合并和 Flash 幂等。
+- PARAM_VALUE 同时返回 RAM/Flash 值，非持久化参数不伪造 Flash 值；Commit ACK 回显 CRC32 和单次递增的 Storage Generation。
 - 混合 `f32/i32/u32/flags32` 遥测、时间戳回绕、批次缺失和订阅切换。
 - 日志洪泛、遥测拥塞和 P0/P1 优先级保证。
 - A/B 双槽写入成功、写失败、读回失败和掉电故障注入。
