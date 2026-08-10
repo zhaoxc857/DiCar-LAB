@@ -138,22 +138,22 @@ Cover successful Commit, failed storage, failed verification, idempotent retry, 
 fn commit_updates_flash_once_and_returns_generation() {
     let mut harness = WireHarness::new();
     let session = harness.hello(1).unwrap();
-    let before = harness.read_parameter(session, 100).unwrap();
-    let write = harness.write_f32(session, 100, before.revision, 2.5).unwrap();
+    let before = harness.read_parameter(session, 1).unwrap();
+    let write = harness.write_f32(session, 1, before.revision, 2.5).unwrap();
     let sequence = 0x4242;
     let first = harness.commit_with_sequence(
         session,
-        vec![(100, write.new_revision)],
+        vec![(1, write.new_revision)],
         sequence,
     ).unwrap();
     let retry = harness.commit_with_sequence(
         session,
-        vec![(100, write.new_revision)],
+        vec![(1, write.new_revision)],
         sequence,
     ).unwrap();
     assert_eq!(first, retry);
     assert_eq!(first.storage_generation, 1);
-    let after = harness.read_parameter(session, 100).unwrap();
+    let after = harness.read_parameter(session, 1).unwrap();
     assert_eq!(after.value, ParamValue::F32(2.5));
     assert_eq!(after.persisted_value, Some(ParamValue::F32(2.5)));
 }
@@ -219,7 +219,7 @@ fn telemetry_value(descriptor: &TelemetryDescriptor, timestamp_us: u64) -> u32 {
 }
 ~~~
 
-Use Chinese display names/groups to exercise UTF-8. Keep exact values deterministic for the same descriptor and timestamp.
+Use Chinese display names/groups to exercise UTF-8, including `pid.kp` as `速度 Kp` and the encoder parameter group as `编码器`; never change the stable machine names, IDs, or types (`encoder.left.ppr` remains U32 parameter 100). Keep exact values deterministic for the same descriptor and timestamp.
 
 - [ ] **Step 8: Run full protocol/simulator gates**
 
@@ -517,8 +517,8 @@ git commit -m 'feat(core): establish DCTP application sessions'
 #[test]
 fn accepted_ram_write_becomes_dirty_without_changing_flash() {
     let mut workspace = fixture_workspace();
-    workspace.accept_write(100, ParamValue::F32(2.0), 1).unwrap();
-    let value = workspace.get(100).unwrap();
+    workspace.accept_write(1, ParamValue::F32(2.0), 1).unwrap();
+    let value = workspace.get(1).unwrap();
     assert_eq!(value.ram_value, ParamValue::F32(2.0));
     assert_eq!(value.persisted_value, Some(ParamValue::F32(1.0)));
     assert!(value.dirty);
@@ -532,16 +532,16 @@ fn observer_and_tuner_without_flash_permission_receive_textual_denials() {
 
 #[test]
 fn dirty_state_uses_wire_bits_for_signed_zero_and_nan_payloads() {
-    let mut workspace = unconstrained_f32_workspace(100, ParamValue::F32(0.0));
-    workspace.accept_write(100, ParamValue::F32(-0.0), 1).unwrap();
-    assert!(workspace.get(100).unwrap().dirty);
+    let mut workspace = unconstrained_f32_workspace(7, ParamValue::F32(0.0));
+    workspace.accept_write(7, ParamValue::F32(-0.0), 1).unwrap();
+    assert!(workspace.get(7).unwrap().dirty);
 
     let bits = 0x7fc0_0001;
-    let mut workspace = unconstrained_f32_workspace(100, ParamValue::F32(f32::from_bits(bits)));
-    workspace.accept_write(100, ParamValue::F32(f32::from_bits(bits)), 1).unwrap();
-    assert!(!workspace.get(100).unwrap().dirty);
-    workspace.accept_write(100, ParamValue::F32(f32::from_bits(bits + 1)), 2).unwrap();
-    assert!(workspace.get(100).unwrap().dirty);
+    let mut workspace = unconstrained_f32_workspace(7, ParamValue::F32(f32::from_bits(bits)));
+    workspace.accept_write(7, ParamValue::F32(f32::from_bits(bits)), 1).unwrap();
+    assert!(!workspace.get(7).unwrap().dirty);
+    workspace.accept_write(7, ParamValue::F32(f32::from_bits(bits + 1)), 2).unwrap();
+    assert!(workspace.get(7).unwrap().dirty);
 }
 ~~~
 
@@ -586,8 +586,8 @@ ParameterWorkspace holds in_flight: HashMap<u32, PendingWrite> and queued_latest
 #[test]
 fn commit_sorts_dirty_persistent_values_and_updates_generation() {
     let mut connected = connected_owner_fixture();
-    connected.write(101, ParamValue::F32(0.8)).unwrap();
-    connected.write(100, ParamValue::F32(2.2)).unwrap();
+    connected.write(100, ParamValue::U32(640)).unwrap();
+    connected.write(1, ParamValue::F32(2.2)).unwrap();
     let result = connected.commit_dirty().unwrap();
     assert_eq!(result.storage_generation, 1);
     assert_eq!(connected.workspace().dirty_count(), 0);
@@ -596,10 +596,10 @@ fn commit_sorts_dirty_persistent_values_and_updates_generation() {
 #[test]
 fn failed_commit_keeps_ram_dirty_and_old_flash_values() {
     let mut connected = connected_owner_with_failure(CommitFailure::Storage);
-    connected.write(100, ParamValue::F32(2.2)).unwrap();
+    connected.write(1, ParamValue::F32(2.2)).unwrap();
     assert!(connected.commit_dirty().is_err());
-    assert_eq!(connected.workspace().get(100).unwrap().persisted_value, Some(ParamValue::F32(1.0)));
-    assert!(connected.workspace().get(100).unwrap().dirty);
+    assert_eq!(connected.workspace().get(1).unwrap().persisted_value, Some(ParamValue::F32(1.0)));
+    assert!(connected.workspace().get(1).unwrap().dirty);
 }
 ~~~
 
