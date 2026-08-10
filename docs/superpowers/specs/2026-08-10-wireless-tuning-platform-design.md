@@ -1,5 +1,7 @@
 # DiCar Tune 无线调参与遥测平台设计规格
 
+> 专项更新：串口帧、会话、混合类型遥测、单车多主机协作和无线烧录协调，以 [DiCar Tune 串口协议与单车多主机协作设计规格](./2026-08-10-dicar-serial-collaboration-protocol-design.md) 为准。
+
 - 状态：设计已确认，待用户复核书面规格
 - 日期：2026-08-10
 - 首版平台：Windows 桌面端
