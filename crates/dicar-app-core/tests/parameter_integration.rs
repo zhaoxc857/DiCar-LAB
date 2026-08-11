@@ -1,6 +1,4 @@
-use dctp_protocol::{
-    canonical_parameter_crc32, ParamCommit, ParamCommitEntry, ParamValue, ParamWriteAck, WireEncode,
-};
+use dctp_protocol::{MessageType, ParamValue, ParamWrite, ParamWriteAck, WireEncode};
 use dctp_sim::SimulatorServer;
 use dicar_app_core::{
     decode_revision_conflict_context, AccessProfile, AccessRole, CoreError, FixedNonce, LeaseState,
@@ -24,38 +22,41 @@ fn typed_real_session_write_conflict_and_commit_round_trip() {
     let transport = TcpTransport::connect(server.local_addr()).unwrap();
     let mut session = ProtocolSession::new(transport, FixedNonce(55), SystemClock::new());
     let connected = session.connect_and_load().unwrap();
-    let initial = connected
-        .parameter_states
-        .iter()
-        .find(|state| state.param_id == 1)
+    let mut workspace = ParameterWorkspace::from_manifest_and_states(
+        &connected.manifest,
+        &connected.parameter_states,
+    )
+    .unwrap();
+    let owner = AccessProfile::new(AccessRole::Owner, LeaseState::Active);
+    let pending = workspace
+        .queue_write(owner, 1, ParamValue::F32(2.25))
+        .unwrap()
         .unwrap();
 
-    let ack = session
-        .write_parameter(1, initial.revision, ParamValue::F32(2.25))
-        .unwrap();
+    let ack = session.execute_write(&workspace, &pending).unwrap();
     assert!(ack.value.wire_eq(&ParamValue::F32(2.25)));
-    assert_eq!(ack.new_revision, initial.revision + 1);
-
-    match session.write_parameter(1, initial.revision, ParamValue::F32(3.0)) {
+    let conflict = match session.execute_write(&workspace, &pending) {
         Err(CoreError::RevisionConflict { current }) => {
             assert!(current.value.wire_eq(&ParamValue::F32(2.25)));
             assert_eq!(current.new_revision, ack.new_revision);
+            current
         }
         other => panic!("expected typed revision conflict, got {other:?}"),
-    }
-
-    let crc = canonical_parameter_crc32(&[(1, ack.value.clone())]).unwrap();
-    let commit_ack = session
-        .commit_parameters(&ParamCommit {
-            entries: vec![ParamCommitEntry {
-                param_id: 1,
-                revision: ack.new_revision,
-            }],
-            canonical_crc32: crc,
-        })
+    };
+    workspace
+        .resolve_write(
+            1,
+            &pending,
+            Err(dicar_app_core::WriteFailure::RevisionConflict(conflict)),
+        )
         .unwrap();
-    assert_eq!(commit_ack.canonical_crc32, crc);
+
+    let plan = workspace.commit_dirty(owner).unwrap().unwrap();
+    let commit_ack = session.execute_commit(&workspace, &plan).unwrap();
+    assert_eq!(commit_ack.canonical_crc32, plan.canonical_crc32());
     assert_eq!(commit_ack.storage_generation, 1);
+    workspace.resolve_commit(&plan, Ok(commit_ack)).unwrap();
+    assert_eq!(workspace.dirty_count(), 0);
 
     session.close().unwrap();
     server.shutdown().unwrap();
@@ -122,6 +123,22 @@ fn permission_matrix_sends_zero_frames_when_denied_and_allows_tuner_ram_owner_co
     )
     .unwrap();
 
+    let before_raw_bypass = writes.load(Ordering::SeqCst);
+    assert!(matches!(
+        session.request(
+            MessageType::ParamWrite,
+            ParamWrite {
+                param_id: 1,
+                expected_revision: 0,
+                value: ParamValue::F32(99.0),
+            }
+            .encode()
+            .unwrap(),
+        ),
+        Err(CoreError::UnauthorizedParameterOperation)
+    ));
+    assert_eq!(writes.load(Ordering::SeqCst), before_raw_bypass);
+
     for profile in [
         AccessProfile::new(AccessRole::Observer, LeaseState::Active),
         AccessProfile::new(AccessRole::Owner, LeaseState::Inactive),
@@ -133,34 +150,44 @@ fn permission_matrix_sends_zero_frames_when_denied_and_allows_tuner_ram_owner_co
             .is_err());
         assert_eq!(writes.load(Ordering::SeqCst), before);
     }
+    let before_invalid = writes.load(Ordering::SeqCst);
+    assert!(workspace
+        .queue_write(
+            AccessProfile::new(AccessRole::Owner, LeaseState::Active),
+            1,
+            ParamValue::F32(f32::NAN),
+        )
+        .is_err());
+    assert_eq!(writes.load(Ordering::SeqCst), before_invalid);
 
     let tuner = AccessProfile::new(AccessRole::Tuner, LeaseState::Active);
     let pending = workspace
         .queue_write(tuner, 1, ParamValue::F32(2.25))
         .unwrap()
         .unwrap();
-    let ack = session
-        .write_parameter(pending.param_id, pending.expected_revision, pending.value)
-        .unwrap();
-    workspace.resolve_write(1, Ok(ack)).unwrap();
-    let before_denied_commit = writes.load(Ordering::SeqCst);
-    assert!(workspace.commit_dirty(tuner).is_err());
-    assert_eq!(writes.load(Ordering::SeqCst), before_denied_commit);
+    let ack = session.execute_write(&workspace, &pending).unwrap();
+    workspace.resolve_write(1, &pending, Ok(ack)).unwrap();
+    for denied in [
+        AccessProfile::new(AccessRole::Observer, LeaseState::Active),
+        AccessProfile::new(AccessRole::Owner, LeaseState::Inactive),
+        AccessProfile::new(AccessRole::Tuner, LeaseState::Inactive),
+        tuner,
+    ] {
+        let before_denied_commit = writes.load(Ordering::SeqCst);
+        assert!(workspace.commit_dirty(denied).is_err());
+        assert_eq!(writes.load(Ordering::SeqCst), before_denied_commit);
+    }
 
     let owner = AccessProfile::new(AccessRole::Owner, LeaseState::Active);
     let pending = workspace
         .queue_write(owner, 100, ParamValue::U32(640))
         .unwrap()
         .unwrap();
-    let ack = session
-        .write_parameter(pending.param_id, pending.expected_revision, pending.value)
-        .unwrap();
-    workspace.resolve_write(100, Ok(ack)).unwrap();
+    let ack = session.execute_write(&workspace, &pending).unwrap();
+    workspace.resolve_write(100, &pending, Ok(ack)).unwrap();
 
     let plan = workspace.commit_dirty(owner).unwrap().unwrap();
-    let ack = session
-        .commit_parameters(&plan.to_protocol_commit())
-        .unwrap();
+    let ack = session.execute_commit(&workspace, &plan).unwrap();
     workspace.resolve_commit(&plan, Ok(ack)).unwrap();
     assert_eq!(workspace.dirty_count(), 0);
     let before_empty_commit = writes.load(Ordering::SeqCst);

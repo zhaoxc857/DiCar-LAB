@@ -5,12 +5,13 @@ use std::sync::{Arc, Mutex};
 use dctp_protocol::{
     crc32_iso_hdlc, decode_packet, encode_frame, CapabilityFlags, DeviceManifest, ErrorCode,
     ErrorPayload, Frame, FrameFlags, HelloAck, ManifestChunk, ManifestDone, MessageType,
-    ParamCommit, ParamConstraints, ParamDescriptor, ParamFlags, ParamRead, ParamState, ParamType,
-    ParamValue, ParamWrite, ParamWriteAck, WireDecode, WireEncode, MANIFEST_SCHEMA_VERSION,
+    ParamConstraints, ParamDescriptor, ParamFlags, ParamRead, ParamState, ParamType, ParamValue,
+    ParamWriteAck, WireDecode, WireEncode, MANIFEST_SCHEMA_VERSION,
 };
 use dicar_app_core::{
-    Clock, ConnectionPhase, CoreError, Endpoint, FixedNonce, ProtocolSession, TestClock, Transport,
-    TransportError, TransportIdentity,
+    AccessProfile, AccessRole, Clock, ConnectionPhase, CoreError, Endpoint, FixedNonce, LeaseState,
+    ParameterWorkspace, ProtocolSession, TestClock, Transport, TransportError, TransportIdentity,
+    WriteFailure,
 };
 
 const SESSION_ONE: u32 = 0x1111_0001;
@@ -81,6 +82,26 @@ impl FakeControl {
 
     fn queue_unsolicited(&self, frame: Frame) {
         FakeTransport::queue_response(&mut self.0.lock().unwrap(), frame, false);
+    }
+
+    fn queue_revision_conflict_for_next_write(&self, session_id: u32, context: &str) {
+        let mut state = self.0.lock().unwrap();
+        let sequence = state.writes.last().unwrap().header.sequence.wrapping_add(1);
+        let payload = ErrorPayload {
+            original_message_type: MessageType::ParamWrite,
+            original_sequence: sequence,
+            error_code: ErrorCode::RevisionConflict,
+            context: context.to_owned(),
+        };
+        let frame = Frame::new(
+            MessageType::Error,
+            FrameFlags::from_bits(FrameFlags::ERROR.bits() | FrameFlags::RESPONSE.bits()),
+            sequence,
+            session_id,
+            payload.encode().unwrap(),
+        )
+        .unwrap();
+        FakeTransport::queue_response(&mut state, frame, false);
     }
 
     fn pending_read_bytes(&self) -> usize {
@@ -489,6 +510,32 @@ fn ready_session() -> (ProtocolSession<FakeTransport>, FakeControl, TestClock) {
     (session, control, clock)
 }
 
+fn ready_workspace(session: &ProtocolSession<FakeTransport>) -> ParameterWorkspace {
+    let connected = session.connected_device().unwrap();
+    ParameterWorkspace::from_manifest_and_states(&connected.manifest, &connected.parameter_states)
+        .unwrap()
+}
+
+fn dirty_workspace(session: &ProtocolSession<FakeTransport>) -> ParameterWorkspace {
+    let mut workspace = ready_workspace(session);
+    let owner = AccessProfile::new(AccessRole::Owner, LeaseState::Active);
+    let pending = workspace
+        .queue_write(owner, 1, ParamValue::U32(43))
+        .unwrap()
+        .unwrap();
+    workspace
+        .resolve_write(
+            1,
+            &pending,
+            Ok(ParamWriteAck {
+                value: ParamValue::U32(43),
+                new_revision: 4,
+            }),
+        )
+        .unwrap();
+    workspace
+}
+
 #[test]
 fn crc_noise_is_counted_and_the_following_valid_frame_completes_the_request() {
     let (mut session, control, _clock) = ready_session();
@@ -726,19 +773,14 @@ fn manifest_retry_ignores_a_delayed_tail_until_the_replayed_first_chunk() {
 #[test]
 fn commit_request_uses_three_sends_and_one_sequence() {
     let (mut session, control, _clock) = ready_session();
+    let mut workspace = dirty_workspace(&session);
+    let plan = workspace
+        .commit_dirty(AccessProfile::new(AccessRole::Owner, LeaseState::Active))
+        .unwrap()
+        .unwrap();
     control.set_fault(Fault::DropCommitWithRefresh);
 
-    let error = session
-        .request(
-            MessageType::ParamCommit,
-            ParamCommit {
-                entries: Vec::new(),
-                canonical_crc32: 0,
-            }
-            .encode()
-            .unwrap(),
-        )
-        .unwrap_err();
+    let error = session.execute_commit(&workspace, &plan).unwrap_err();
 
     assert!(matches!(
         error,
@@ -757,19 +799,14 @@ fn commit_request_uses_three_sends_and_one_sequence() {
 #[test]
 fn silent_commit_stops_before_the_retry_at_the_stale_deadline() {
     let (mut session, control, _clock) = ready_session();
+    let mut workspace = dirty_workspace(&session);
+    let plan = workspace
+        .commit_dirty(AccessProfile::new(AccessRole::Owner, LeaseState::Active))
+        .unwrap()
+        .unwrap();
     control.set_fault(Fault::Drop(MessageType::ParamCommit));
 
-    let error = session
-        .request(
-            MessageType::ParamCommit,
-            ParamCommit {
-                entries: Vec::new(),
-                canonical_crc32: 0,
-            }
-            .encode()
-            .unwrap(),
-        )
-        .unwrap_err();
+    let error = session.execute_commit(&workspace, &plan).unwrap_err();
 
     assert!(matches!(error, CoreError::Disconnected));
     assert_eq!(session.phase(), ConnectionPhase::Disconnected);
@@ -797,6 +834,62 @@ fn device_error_frame_is_returned_as_typed_core_error() {
             ..
         } if context == "unknown parameter"
     ));
+}
+
+#[test]
+fn malformed_revision_conflict_context_never_overwrites_confirmed_truth() {
+    let encoded = ParamWriteAck {
+        value: ParamValue::U32(0xdead_beef),
+        new_revision: 0xabcd_ef01,
+    }
+    .encode()
+    .unwrap();
+    let valid = encoded
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let malformed_contexts = [
+        valid.to_uppercase(),
+        valid[..valid.len() - 1].to_owned(),
+        format!("{}g0", &valid[..valid.len() - 2]),
+        format!("{valid}00"),
+    ];
+
+    for context in malformed_contexts {
+        let (mut session, control, _clock) = ready_session();
+        let mut workspace = ready_workspace(&session);
+        let before = workspace.get(1).unwrap().clone();
+        let pending = workspace
+            .queue_write(
+                AccessProfile::new(AccessRole::Owner, LeaseState::Active),
+                1,
+                ParamValue::U32(43),
+            )
+            .unwrap()
+            .unwrap();
+        control.queue_revision_conflict_for_next_write(session.session_id().unwrap(), &context);
+
+        assert!(matches!(
+            session.execute_write(&workspace, &pending),
+            Err(CoreError::Protocol(_))
+        ));
+        let after_wire_error = workspace.get(1).unwrap();
+        assert!(after_wire_error.ram_value.wire_eq(&before.ram_value));
+        assert_eq!(after_wire_error.persisted_value, before.persisted_value);
+        assert_eq!(after_wire_error.revision, before.revision);
+        assert_eq!(after_wire_error.dirty, before.dirty);
+        assert_eq!(workspace.pending_write_count(), 1);
+
+        workspace
+            .resolve_write(1, &pending, Err(WriteFailure::Ordinary))
+            .unwrap();
+        let after_settlement = workspace.get(1).unwrap();
+        assert!(after_settlement.ram_value.wire_eq(&before.ram_value));
+        assert_eq!(after_settlement.persisted_value, before.persisted_value);
+        assert_eq!(after_settlement.revision, before.revision);
+        assert_eq!(after_settlement.dirty, before.dirty);
+        assert_eq!(workspace.pending_write_count(), 0);
+    }
 }
 
 #[test]
@@ -864,18 +957,17 @@ fn wrong_session_response_disconnects_and_prevents_later_writes() {
 fn reconnect_uses_new_session_reloads_parameters_and_replaces_changed_manifest() {
     let (mut session, control, _clock) = ready_session();
     let first_session_id = session.session_id().unwrap();
-    session
-        .request(
-            MessageType::ParamWrite,
-            ParamWrite {
-                param_id: 1,
-                expected_revision: 3,
-                value: ParamValue::U32(43),
-            }
-            .encode()
-            .unwrap(),
+    let mut workspace = ready_workspace(&session);
+    let pending = workspace
+        .queue_write(
+            AccessProfile::new(AccessRole::Owner, LeaseState::Active),
+            1,
+            ParamValue::U32(43),
         )
+        .unwrap()
         .unwrap();
+    let ack = session.execute_write(&workspace, &pending).unwrap();
+    workspace.resolve_write(1, &pending, Ok(ack)).unwrap();
     control.set_manifest_name("gain_b");
 
     let reconnected = session.connect_and_load().unwrap();

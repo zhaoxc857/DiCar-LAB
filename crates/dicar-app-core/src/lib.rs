@@ -11,9 +11,9 @@ pub use clock::{Clock, FixedNonce, NonceSource, SystemClock, SystemNonce, TestCl
 pub use error::{CoreError, TransportError};
 pub use model::{ConnectedDevice, ConnectionPhase, DeviceIdentity, DiagnosticsSnapshot};
 pub use parameter_workspace::{
-    CommitFailureKind, CommitPlan, ConfirmedChange, DeviceSyncState, ParameterRecord,
-    ParameterWorkspace, PendingWrite, RevertPlan, RevertReport, WorkspaceError, WriteFailure,
-    WriteState,
+    CommitFailureKind, CommitPlan, ConfirmedChange, DeviceSyncState, OperationToken,
+    ParameterRecord, ParameterWorkspace, PendingWrite, RevertPlan, RevertReport, WorkspaceError,
+    WorkspaceGeneration, WriteFailure, WriteState,
 };
 pub use session::{decode_revision_conflict_context, ProtocolSession};
 pub use transport::{Endpoint, TcpTransport, Transport, TransportIdentity};

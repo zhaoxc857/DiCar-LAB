@@ -51,3 +51,28 @@ The brief's mention of numeric `step` could be read as requiring alignment. The 
 - Partial revert reports confirmed and failed IDs separately, and only ACK-confirmed records change.
 - All mutable maps are keyed by IDs already bounded by Manifest size; history is fixed at 128 with oldest eviction.
 - AppActor/threading, Tauri, UI, distributed leases, Git history, serial/flashing, multi-car, and encoder algorithms remain intentionally outside Task 5.
+
+## Formal review fix round 1
+
+- Write completion is now bound to an opaque, monotonically increasing operation token and a workspace generation. `resolve_write` verifies generation, token, parameter ID, expected revision, and bit-exact value before removing an in-flight operation or changing state. Reconnect increments the generation without resetting the token counter; stale, duplicate, wrong-ID, and old-generation completions are typed zero-mutation errors.
+- A commit plan is registered as one active immutable operation with its own token and generation. An active commit blocks writes and a second commit. Only the exact active plan can settle it; success applies the complete captured value set atomically, while timeout/device/verify/storage, CRC, and plan errors clear the active operation without changing Flash truth, dirty flags, or storage generation.
+- `revert_all` performs a read-only preflight of every target before registering any write. Its immutable batch token binds the complete write set. Resolution validates exact one-to-one coverage, unique tokens, matching operations, and response types before applying any result. A malformed/missing/duplicate/extra result therefore changes nothing; a structurally valid partial failure applies ACK-confirmed results and reports failed IDs.
+- Raw `ParamWrite` and `ParamCommit` use through the public generic session request is rejected before encoding or transport. Raw typed sends are private; the public typed execution path accepts only an active opaque `PendingWrite` or `CommitPlan` minted by the workspace after access and value validation. The access policy remains a local/demo gate, not a distributed security boundary.
+- The scripted wire regression injects uppercase, odd-length, non-hex, and trailing-byte revision-conflict contexts. Each is rejected as a protocol error without changing RAM, Flash, revision, or dirty truth. The caller then explicitly settles the exact pending operation as an ordinary failure: only operation bookkeeping/error presentation changes, pending becomes zero, and all four confirmed truth fields remain unchanged. A strict lowercase real-simulator conflict still refreshes current device truth and does not auto-retry.
+- A two-record commit regression models a batch verify failure surfaced after the second entry. Both complete records remain byte/field-equivalent to their snapshots, both remain dirty, and storage generation remains unchanged; the cleared active operation permits a retry with a new token.
+
+### Fix-round TDD and compatibility notes
+
+- A/B/C/D each began with focused compile/test REDs for the missing token, generation, active-operation, coverage, and sealed-execution APIs, followed by focused GREENs. The final workspace regression suite contains 25 tests.
+- The malformed-context integration first had a harness-only compile RED while the scripted ERROR-frame helper was absent. Once the harness compiled, the product behavior was immediately GREEN; this is recorded honestly as added regression evidence rather than a newly fixed product defect.
+- The two-record commit-failure test was also immediately GREEN after the active commit redesign; it strengthens all-or-nothing evidence rather than claiming a separate production change.
+- Three pre-existing `session_faults` tests were adapted from generic raw parameter requests to opaque workspace plans. Their retry count, sequence reuse, disconnect deadline, reconnect, and frame-count assertions were unchanged; this was an API adaptation, not a behavior change.
+- Adding `CoreError::Workspace` and `CoreError::UnauthorizedParameterOperation` can break downstream exhaustive matches on the public enum. This is recorded as a Minor source-compatibility change.
+
+### Fix-round fresh verification
+
+- `cargo +stable-x86_64-pc-windows-gnu fmt --all -- --check` — exit 0.
+- Focused affected suites in the isolated `target-task5-fix` directory — `parameter_integration` 3/3, `parameter_workspace` 25/25, and `session_faults` 19/19; 47 passed, 0 failed.
+- `cargo +stable-x86_64-pc-windows-gnu clippy --workspace --all-targets --target-dir C:\DiCar_LAB\task5-fix-clippy-round1 -- -D warnings` — exit 0, zero warnings, from a new isolated target directory.
+- `cargo +stable-x86_64-pc-windows-gnu test --workspace --all-targets --target-dir C:\DiCar_LAB\task5-fix-test-round1` — exit 0; 148 passed, 0 failed, from a second new isolated target directory.
+- `git diff --check` — exit 0; only Git's existing LF-to-CRLF notices were emitted.

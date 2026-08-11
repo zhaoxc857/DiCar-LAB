@@ -56,6 +56,18 @@ pub enum WorkspaceError {
     InvalidCommitPlan,
     NotRevertible(u32),
     DeviceStateUnknown(u32),
+    WriteOperationMismatch,
+    StaleWriteOperation,
+    OldWorkspaceGeneration,
+    OperationTokenExhausted,
+    WorkspaceGenerationExhausted,
+    CommitInFlight,
+    CommitOperationMismatch,
+    StaleCommitOperation,
+    RevertInFlight,
+    RevertCoverageMismatch,
+    RevertOperationMismatch,
+    StaleRevertOperation,
 }
 
 impl fmt::Display for WorkspaceError {
@@ -87,6 +99,18 @@ impl fmt::Display for WorkspaceError {
                 write!(formatter, "参数 {param_id} 没有可回退的固化值")
             }
             Self::DeviceStateUnknown(_) => formatter.write_str("设备状态未知，不能修改参数"),
+            Self::WriteOperationMismatch => formatter.write_str("写入操作与在途请求不匹配"),
+            Self::StaleWriteOperation => formatter.write_str("写入操作已过期或已完成"),
+            Self::OldWorkspaceGeneration => formatter.write_str("写入操作属于旧设备工作区"),
+            Self::OperationTokenExhausted => formatter.write_str("操作令牌已耗尽"),
+            Self::WorkspaceGenerationExhausted => formatter.write_str("工作区世代已耗尽"),
+            Self::CommitInFlight => formatter.write_str("已有固化操作等待确认"),
+            Self::CommitOperationMismatch => formatter.write_str("固化确认与活动计划不匹配"),
+            Self::StaleCommitOperation => formatter.write_str("固化计划已过期或已完成"),
+            Self::RevertInFlight => formatter.write_str("已有批量回退等待确认"),
+            Self::RevertCoverageMismatch => formatter.write_str("批量回退结果覆盖不完整或重复"),
+            Self::RevertOperationMismatch => formatter.write_str("批量回退结果与活动计划不匹配"),
+            Self::StaleRevertOperation => formatter.write_str("批量回退计划已过期或已完成"),
         }
     }
 }
@@ -100,13 +124,43 @@ pub struct ParameterWorkspace {
     queued_latest: BTreeMap<u32, ParamValue>,
     storage_generation: u32,
     history: VecDeque<ConfirmedChange>,
+    workspace_generation: WorkspaceGeneration,
+    next_operation_token: u64,
+    active_commit: Option<CommitPlan>,
+    active_revert: Option<RevertPlan>,
 }
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct OperationToken(u64);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct WorkspaceGeneration(u64);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PendingWrite {
+    operation_token: OperationToken,
+    workspace_generation: WorkspaceGeneration,
     pub param_id: u32,
     pub expected_revision: u32,
     pub value: ParamValue,
+}
+
+impl PendingWrite {
+    pub const fn operation_token(&self) -> OperationToken {
+        self.operation_token
+    }
+
+    pub const fn workspace_generation(&self) -> WorkspaceGeneration {
+        self.workspace_generation
+    }
+
+    fn wire_matches(&self, other: &Self) -> bool {
+        self.operation_token == other.operation_token
+            && self.workspace_generation == other.workspace_generation
+            && self.param_id == other.param_id
+            && self.expected_revision == other.expected_revision
+            && self.value.wire_eq(&other.value)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -125,12 +179,22 @@ pub enum CommitFailureKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommitPlan {
+    operation_token: OperationToken,
+    workspace_generation: WorkspaceGeneration,
     entries: Vec<ParamCommitEntry>,
     values: Vec<(u32, ParamValue)>,
     canonical_crc32: u32,
 }
 
 impl CommitPlan {
+    pub const fn operation_token(&self) -> OperationToken {
+        self.operation_token
+    }
+
+    pub const fn workspace_generation(&self) -> WorkspaceGeneration {
+        self.workspace_generation
+    }
+
     pub fn entries(&self) -> &[ParamCommitEntry] {
         &self.entries
     }
@@ -149,6 +213,21 @@ impl CommitPlan {
             canonical_crc32: self.canonical_crc32,
         }
     }
+
+    fn wire_matches(&self, other: &Self) -> bool {
+        self.operation_token == other.operation_token
+            && self.workspace_generation == other.workspace_generation
+            && self.canonical_crc32 == other.canonical_crc32
+            && self.entries == other.entries
+            && self.values.len() == other.values.len()
+            && self
+                .values
+                .iter()
+                .zip(&other.values)
+                .all(|((left_id, left), (right_id, right))| {
+                    left_id == right_id && left.wire_eq(right)
+                })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -160,8 +239,34 @@ pub struct ConfirmedChange {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RevertPlan {
-    pub writes: Vec<PendingWrite>,
-    pub not_revertible_ids: Vec<u32>,
+    operation_token: OperationToken,
+    workspace_generation: WorkspaceGeneration,
+    writes: Vec<PendingWrite>,
+}
+
+impl RevertPlan {
+    pub const fn operation_token(&self) -> OperationToken {
+        self.operation_token
+    }
+
+    pub const fn workspace_generation(&self) -> WorkspaceGeneration {
+        self.workspace_generation
+    }
+
+    pub fn writes(&self) -> &[PendingWrite] {
+        &self.writes
+    }
+
+    fn wire_matches(&self, other: &Self) -> bool {
+        self.operation_token == other.operation_token
+            && self.workspace_generation == other.workspace_generation
+            && self.writes.len() == other.writes.len()
+            && self
+                .writes
+                .iter()
+                .zip(&other.writes)
+                .all(|(left, right)| left.wire_matches(right))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -229,6 +334,10 @@ impl ParameterWorkspace {
             queued_latest: BTreeMap::new(),
             storage_generation: 0,
             history: VecDeque::with_capacity(HISTORY_CAPACITY),
+            workspace_generation: WorkspaceGeneration(1),
+            next_operation_token: 1,
+            active_commit: None,
+            active_revert: None,
         })
     }
 
@@ -242,12 +351,53 @@ impl ParameterWorkspace {
         param_id: u32,
         value: ParamValue,
     ) -> Result<Option<PendingWrite>, WorkspaceError> {
-        if let PermissionDecision::Denied(reason) = access.can_write() {
-            return Err(WorkspaceError::PermissionDenied(reason));
-        }
+        self.validate_write_candidate(access, param_id, &value)?;
         let record = self
             .records
             .get_mut(&param_id)
+            .ok_or(WorkspaceError::UnknownParameter(param_id))?;
+        record.last_error = None;
+        record.unresolved_target = None;
+        if self.in_flight.contains_key(&param_id) {
+            self.queued_latest.insert(param_id, value);
+            record.write_state = WriteState::Queued;
+            return Ok(None);
+        }
+        let operation_token = OperationToken(self.next_operation_token);
+        self.next_operation_token = self
+            .next_operation_token
+            .checked_add(1)
+            .ok_or(WorkspaceError::OperationTokenExhausted)?;
+        let pending = PendingWrite {
+            operation_token,
+            workspace_generation: self.workspace_generation,
+            param_id,
+            expected_revision: record.revision,
+            value,
+        };
+        record.write_state = WriteState::InFlight;
+        self.in_flight.insert(param_id, pending.clone());
+        Ok(Some(pending))
+    }
+
+    fn validate_write_candidate(
+        &self,
+        access: AccessProfile,
+        param_id: u32,
+        value: &ParamValue,
+    ) -> Result<(), WorkspaceError> {
+        if let PermissionDecision::Denied(reason) = access.can_write() {
+            return Err(WorkspaceError::PermissionDenied(reason));
+        }
+        if self.active_commit.is_some() {
+            return Err(WorkspaceError::CommitInFlight);
+        }
+        if self.active_revert.is_some() {
+            return Err(WorkspaceError::RevertInFlight);
+        }
+        let record = self
+            .records
+            .get(&param_id)
             .ok_or(WorkspaceError::UnknownParameter(param_id))?;
         if record.sync_state == DeviceSyncState::Unknown {
             return Err(WorkspaceError::DeviceStateUnknown(param_id));
@@ -258,7 +408,7 @@ impl ParameterWorkspace {
         if record.descriptor.flags.bits() & ParamFlags::WRITABLE.bits() == 0 {
             return Err(WorkspaceError::ReadOnly(param_id));
         }
-        match (&value, &record.descriptor.constraints) {
+        match (value, &record.descriptor.constraints) {
             (_, ParamConstraints::None) => {}
             (
                 ParamValue::I32(value),
@@ -291,32 +441,32 @@ impl ParameterWorkspace {
             }
             _ => return Err(WorkspaceError::OutOfRange(param_id)),
         }
-        record.last_error = None;
-        record.unresolved_target = None;
-        if self.in_flight.contains_key(&param_id) {
-            self.queued_latest.insert(param_id, value);
-            record.write_state = WriteState::Queued;
-            return Ok(None);
-        }
-        let pending = PendingWrite {
-            param_id,
-            expected_revision: record.revision,
-            value,
-        };
-        record.write_state = WriteState::InFlight;
-        self.in_flight.insert(param_id, pending.clone());
-        Ok(Some(pending))
+        Ok(())
     }
 
     pub fn resolve_write(
         &mut self,
         param_id: u32,
+        operation: &PendingWrite,
         result: Result<ParamWriteAck, WriteFailure>,
     ) -> Result<Option<PendingWrite>, WorkspaceError> {
+        if operation.workspace_generation != self.workspace_generation {
+            return Err(WorkspaceError::OldWorkspaceGeneration);
+        }
+        if operation.param_id != param_id {
+            return Err(WorkspaceError::WriteOperationMismatch);
+        }
+        let active = self
+            .in_flight
+            .get(&param_id)
+            .ok_or(WorkspaceError::StaleWriteOperation)?;
+        if !active.wire_matches(operation) {
+            return Err(WorkspaceError::WriteOperationMismatch);
+        }
         let pending = self
             .in_flight
             .remove(&param_id)
-            .ok_or(WorkspaceError::UnexpectedAck(param_id))?;
+            .ok_or(WorkspaceError::StaleWriteOperation)?;
         let record = self
             .records
             .get_mut(&param_id)
@@ -361,7 +511,14 @@ impl ParameterWorkspace {
                     record.write_state = WriteState::Idle;
                     return Ok(None);
                 }
+                let operation_token = OperationToken(self.next_operation_token);
+                self.next_operation_token = self
+                    .next_operation_token
+                    .checked_add(1)
+                    .ok_or(WorkspaceError::OperationTokenExhausted)?;
                 let follow_up = PendingWrite {
+                    operation_token,
+                    workspace_generation: self.workspace_generation,
                     param_id,
                     expected_revision: record.revision,
                     value: queued,
@@ -397,11 +554,14 @@ impl ParameterWorkspace {
     }
 
     pub fn commit_dirty(
-        &self,
+        &mut self,
         access: AccessProfile,
     ) -> Result<Option<CommitPlan>, WorkspaceError> {
         if let PermissionDecision::Denied(reason) = access.can_commit() {
             return Err(WorkspaceError::PermissionDenied(reason));
+        }
+        if self.active_commit.is_some() {
+            return Err(WorkspaceError::CommitInFlight);
         }
         if !self.in_flight.is_empty() || !self.queued_latest.is_empty() {
             return Err(WorkspaceError::WritesPending);
@@ -422,11 +582,20 @@ impl ParameterWorkspace {
         }
         let canonical_crc32 =
             canonical_parameter_crc32(&values).map_err(|_| WorkspaceError::InvalidCommitPlan)?;
-        Ok(Some(CommitPlan {
+        let operation_token = OperationToken(self.next_operation_token);
+        self.next_operation_token = self
+            .next_operation_token
+            .checked_add(1)
+            .ok_or(WorkspaceError::OperationTokenExhausted)?;
+        let plan = CommitPlan {
+            operation_token,
+            workspace_generation: self.workspace_generation,
             entries,
             values,
             canonical_crc32,
-        }))
+        };
+        self.active_commit = Some(plan.clone());
+        Ok(Some(plan))
     }
 
     pub fn resolve_commit(
@@ -434,6 +603,17 @@ impl ParameterWorkspace {
         plan: &CommitPlan,
         result: Result<ParamCommitAck, CommitFailureKind>,
     ) -> Result<(), WorkspaceError> {
+        if plan.workspace_generation != self.workspace_generation {
+            return Err(WorkspaceError::OldWorkspaceGeneration);
+        }
+        let active = self
+            .active_commit
+            .as_ref()
+            .ok_or(WorkspaceError::StaleCommitOperation)?;
+        if !active.wire_matches(plan) {
+            return Err(WorkspaceError::CommitOperationMismatch);
+        }
+        self.active_commit = None;
         let ack = result.map_err(WorkspaceError::CommitFailed)?;
         if ack.canonical_crc32 != plan.canonical_crc32 {
             return Err(WorkspaceError::CommitCrcMismatch);
@@ -500,54 +680,163 @@ impl ParameterWorkspace {
         if let PermissionDecision::Denied(reason) = access.can_write() {
             return Err(WorkspaceError::PermissionDenied(reason));
         }
+        if self.active_commit.is_some() {
+            return Err(WorkspaceError::CommitInFlight);
+        }
+        if self.active_revert.is_some() {
+            return Err(WorkspaceError::RevertInFlight);
+        }
         if !self.in_flight.is_empty() || !self.queued_latest.is_empty() {
             return Err(WorkspaceError::WritesPending);
         }
         let mut targets = Vec::new();
-        let mut not_revertible_ids = Vec::new();
         for (&param_id, record) in &self.records {
             if !record.dirty {
                 continue;
             }
-            match &record.persisted_value {
-                Some(value)
-                    if record.descriptor.flags.bits() & ParamFlags::WRITABLE.bits() != 0 =>
-                {
-                    targets.push((param_id, value.clone()));
-                }
-                _ => not_revertible_ids.push(param_id),
-            }
+            let value = record
+                .persisted_value
+                .clone()
+                .ok_or(WorkspaceError::NotRevertible(param_id))?;
+            self.validate_write_candidate(access, param_id, &value)
+                .map_err(|error| match error {
+                    WorkspaceError::ReadOnly(_) => WorkspaceError::NotRevertible(param_id),
+                    other => other,
+                })?;
+            targets.push((param_id, value));
         }
-        let mut writes = Vec::new();
-        for (param_id, value) in targets {
-            let pending = self
-                .queue_write(access, param_id, value)?
-                .ok_or(WorkspaceError::WritesPending)?;
-            writes.push(pending);
+        let token_count = u64::try_from(targets.len())
+            .map_err(|_| WorkspaceError::OperationTokenExhausted)?
+            .checked_add(1)
+            .ok_or(WorkspaceError::OperationTokenExhausted)?;
+        let next_operation_token = self
+            .next_operation_token
+            .checked_add(token_count)
+            .ok_or(WorkspaceError::OperationTokenExhausted)?;
+        let batch_token = OperationToken(self.next_operation_token);
+        let mut writes = Vec::with_capacity(targets.len());
+        for (index, (param_id, value)) in targets.into_iter().enumerate() {
+            let offset = u64::try_from(index)
+                .map_err(|_| WorkspaceError::OperationTokenExhausted)?
+                .checked_add(1)
+                .ok_or(WorkspaceError::OperationTokenExhausted)?;
+            let operation_token = OperationToken(
+                self.next_operation_token
+                    .checked_add(offset)
+                    .ok_or(WorkspaceError::OperationTokenExhausted)?,
+            );
+            let record = self
+                .records
+                .get(&param_id)
+                .ok_or(WorkspaceError::UnknownParameter(param_id))?;
+            writes.push(PendingWrite {
+                operation_token,
+                workspace_generation: self.workspace_generation,
+                param_id,
+                expected_revision: record.revision,
+                value,
+            });
         }
-        Ok(RevertPlan {
+        let plan = RevertPlan {
+            operation_token: batch_token,
+            workspace_generation: self.workspace_generation,
             writes,
-            not_revertible_ids,
-        })
+        };
+        for pending in &plan.writes {
+            let record = self
+                .records
+                .get_mut(&pending.param_id)
+                .ok_or(WorkspaceError::UnknownParameter(pending.param_id))?;
+            record.last_error = None;
+            record.unresolved_target = None;
+            record.write_state = WriteState::InFlight;
+            self.in_flight.insert(pending.param_id, pending.clone());
+        }
+        self.next_operation_token = next_operation_token;
+        self.active_revert = Some(plan.clone());
+        Ok(plan)
     }
 
-    pub fn resolve_revert_all<I>(&mut self, results: I) -> Result<RevertReport, WorkspaceError>
+    pub fn resolve_revert_all<I>(
+        &mut self,
+        plan: &RevertPlan,
+        results: I,
+    ) -> Result<RevertReport, WorkspaceError>
     where
-        I: IntoIterator<Item = (u32, Result<ParamWriteAck, WriteFailure>)>,
+        I: IntoIterator<Item = (PendingWrite, Result<ParamWriteAck, WriteFailure>)>,
     {
+        if plan.workspace_generation != self.workspace_generation {
+            return Err(WorkspaceError::OldWorkspaceGeneration);
+        }
+        let active = self
+            .active_revert
+            .as_ref()
+            .ok_or(WorkspaceError::StaleRevertOperation)?;
+        if !active.wire_matches(plan) {
+            return Err(WorkspaceError::RevertOperationMismatch);
+        }
+        let mut results = results.into_iter().collect::<Vec<_>>();
+        if results.len() != plan.writes.len() {
+            return Err(WorkspaceError::RevertCoverageMismatch);
+        }
+        let mut covered = vec![false; plan.writes.len()];
+        for (operation, result) in &results {
+            let Some(index) = plan
+                .writes
+                .iter()
+                .position(|planned| planned.operation_token == operation.operation_token)
+            else {
+                return Err(WorkspaceError::RevertCoverageMismatch);
+            };
+            if covered[index] || !plan.writes[index].wire_matches(operation) {
+                return Err(WorkspaceError::RevertCoverageMismatch);
+            }
+            let Some(in_flight) = self.in_flight.get(&operation.param_id) else {
+                return Err(WorkspaceError::RevertCoverageMismatch);
+            };
+            if !in_flight.wire_matches(operation) {
+                return Err(WorkspaceError::RevertCoverageMismatch);
+            }
+            let returned_value = match result {
+                Ok(ack) | Err(WriteFailure::RevisionConflict(ack)) => Some(&ack.value),
+                Err(WriteFailure::Ordinary) => None,
+            };
+            let record = self
+                .records
+                .get(&operation.param_id)
+                .ok_or(WorkspaceError::RevertCoverageMismatch)?;
+            if returned_value
+                .is_some_and(|value| value.param_type() != record.descriptor.param_type)
+            {
+                return Err(WorkspaceError::RevertCoverageMismatch);
+            }
+            covered[index] = true;
+        }
+        if covered.iter().any(|covered| !covered) {
+            return Err(WorkspaceError::RevertCoverageMismatch);
+        }
         let mut confirmed_ids = Vec::new();
         let mut failed_ids = Vec::new();
-        for (param_id, result) in results {
+        for planned in &plan.writes {
+            let result_index = results
+                .iter()
+                .position(|(operation, _)| operation.operation_token == planned.operation_token)
+                .ok_or(WorkspaceError::RevertCoverageMismatch)?;
+            let (operation, result) = results.swap_remove(result_index);
             let confirmed = result.is_ok();
-            if self.resolve_write(param_id, result)?.is_some() {
+            if self
+                .resolve_write(operation.param_id, &operation, result)?
+                .is_some()
+            {
                 return Err(WorkspaceError::WritesPending);
             }
             if confirmed {
-                confirmed_ids.push(param_id);
+                confirmed_ids.push(operation.param_id);
             } else {
-                failed_ids.push(param_id);
+                failed_ids.push(operation.param_id);
             }
         }
+        self.active_revert = None;
         Ok(RevertReport {
             confirmed_ids,
             failed_ids,
@@ -575,6 +864,8 @@ impl ParameterWorkspace {
         self.in_flight.clear();
         self.queued_latest.clear();
         self.history.clear();
+        self.active_commit = None;
+        self.active_revert = None;
         for record in self.records.values_mut() {
             record.sync_state = DeviceSyncState::Unknown;
             record.write_state = WriteState::Idle;
@@ -587,8 +878,16 @@ impl ParameterWorkspace {
         &mut self,
         connected: &ConnectedDevice,
     ) -> Result<(), WorkspaceError> {
-        let replacement =
+        let next_generation = self
+            .workspace_generation
+            .0
+            .checked_add(1)
+            .map(WorkspaceGeneration)
+            .ok_or(WorkspaceError::WorkspaceGenerationExhausted)?;
+        let mut replacement =
             Self::from_manifest_and_states(&connected.manifest, &connected.parameter_states)?;
+        replacement.workspace_generation = next_generation;
+        replacement.next_operation_token = self.next_operation_token;
         *self = replacement;
         Ok(())
     }
@@ -599,5 +898,39 @@ impl ParameterWorkspace {
 
     pub fn records(&self) -> impl ExactSizeIterator<Item = &ParameterRecord> {
         self.records.values()
+    }
+
+    pub(crate) fn validate_pending_execution(
+        &self,
+        operation: &PendingWrite,
+    ) -> Result<(), WorkspaceError> {
+        if operation.workspace_generation != self.workspace_generation {
+            return Err(WorkspaceError::OldWorkspaceGeneration);
+        }
+        let active = self
+            .in_flight
+            .get(&operation.param_id)
+            .ok_or(WorkspaceError::StaleWriteOperation)?;
+        if !active.wire_matches(operation) {
+            return Err(WorkspaceError::WriteOperationMismatch);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_commit_execution(
+        &self,
+        plan: &CommitPlan,
+    ) -> Result<(), WorkspaceError> {
+        if plan.workspace_generation != self.workspace_generation {
+            return Err(WorkspaceError::OldWorkspaceGeneration);
+        }
+        let active = self
+            .active_commit
+            .as_ref()
+            .ok_or(WorkspaceError::StaleCommitOperation)?;
+        if !active.wire_matches(plan) {
+            return Err(WorkspaceError::CommitOperationMismatch);
+        }
+        Ok(())
     }
 }

@@ -3,6 +3,8 @@ use std::io;
 
 use dctp_protocol::{ErrorCode, MessageType, ParamWriteAck, ProtocolError};
 
+use crate::WorkspaceError;
+
 #[derive(Debug)]
 pub enum TransportError {
     Disconnected,
@@ -37,6 +39,8 @@ impl From<io::Error> for TransportError {
 pub enum CoreError {
     Transport(TransportError),
     Protocol(ProtocolError),
+    Workspace(WorkspaceError),
+    UnauthorizedParameterOperation,
     Device {
         original_message_type: MessageType,
         original_sequence: u16,
@@ -62,6 +66,10 @@ impl fmt::Display for CoreError {
         match self {
             Self::Transport(error) => write!(formatter, "{error}"),
             Self::Protocol(error) => write!(formatter, "protocol error: {error:?}"),
+            Self::Workspace(error) => write!(formatter, "workspace error: {error}"),
+            Self::UnauthorizedParameterOperation => {
+                formatter.write_str("raw parameter write or commit is not authorized")
+            }
             Self::Device { code, context, .. } => {
                 write!(formatter, "device error {code:?}: {context}")
             }
@@ -86,6 +94,7 @@ impl std::error::Error for CoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Transport(error) => Some(error),
+            Self::Workspace(error) => Some(error),
             _ => None,
         }
     }
@@ -100,5 +109,11 @@ impl From<TransportError> for CoreError {
 impl From<ProtocolError> for CoreError {
     fn from(error: ProtocolError) -> Self {
         Self::Protocol(error)
+    }
+}
+
+impl From<WorkspaceError> for CoreError {
+    fn from(error: WorkspaceError) -> Self {
+        Self::Workspace(error)
     }
 }

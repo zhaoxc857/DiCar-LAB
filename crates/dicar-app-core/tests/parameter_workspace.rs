@@ -437,6 +437,7 @@ fn coalescing_keeps_only_latest_target_and_uses_ack_revision() {
     let follow_up = workspace
         .resolve_write(
             1,
+            &first,
             Ok(ParamWriteAck {
                 value: ParamValue::U32(14),
                 new_revision: 4,
@@ -459,8 +460,9 @@ fn coalescing_keeps_only_latest_target_and_uses_ack_revision() {
 fn queued_value_equal_to_ack_is_not_sent_again_and_other_ids_are_independent() {
     let (manifest, states) = manifest_and_states();
     let mut workspace = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
-    workspace
+    let first = workspace
         .queue_write(owner(), 1, ParamValue::U32(15))
+        .unwrap()
         .unwrap();
     workspace
         .queue_write(owner(), 1, ParamValue::U32(16))
@@ -473,6 +475,7 @@ fn queued_value_equal_to_ack_is_not_sent_again_and_other_ids_are_independent() {
     assert!(workspace
         .resolve_write(
             1,
+            &first,
             Ok(ParamWriteAck {
                 value: ParamValue::U32(16),
                 new_revision: 4,
@@ -488,15 +491,16 @@ fn queued_value_equal_to_ack_is_not_sent_again_and_other_ids_are_independent() {
 fn ordinary_failure_keeps_confirmed_state_and_clears_latest_queue() {
     let (manifest, states) = manifest_and_states();
     let mut workspace = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
-    workspace
+    let first = workspace
         .queue_write(owner(), 1, ParamValue::U32(15))
+        .unwrap()
         .unwrap();
     workspace
         .queue_write(owner(), 1, ParamValue::U32(16))
         .unwrap();
 
     assert!(workspace
-        .resolve_write(1, Err(WriteFailure::Ordinary))
+        .resolve_write(1, &first, Err(WriteFailure::Ordinary))
         .unwrap()
         .is_none());
     let record = workspace.get(1).unwrap();
@@ -514,8 +518,9 @@ fn ordinary_failure_keeps_confirmed_state_and_clears_latest_queue() {
 fn revision_conflict_refreshes_device_state_and_preserves_latest_user_target() {
     let (manifest, states) = manifest_and_states();
     let mut workspace = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
-    workspace
+    let first = workspace
         .queue_write(owner(), 1, ParamValue::U32(15))
+        .unwrap()
         .unwrap();
     workspace
         .queue_write(owner(), 1, ParamValue::U32(17))
@@ -524,6 +529,7 @@ fn revision_conflict_refreshes_device_state_and_preserves_latest_user_target() {
     assert!(workspace
         .resolve_write(
             1,
+            &first,
             Err(WriteFailure::RevisionConflict(ParamWriteAck {
                 value: ParamValue::U32(99),
                 new_revision: 12,
@@ -547,10 +553,14 @@ fn confirm_write(
     accepted: ParamValue,
     revision: u32,
 ) {
-    workspace.queue_write(owner(), param_id, target).unwrap();
+    let pending = workspace
+        .queue_write(owner(), param_id, target)
+        .unwrap()
+        .unwrap();
     assert!(workspace
         .resolve_write(
             param_id,
+            &pending,
             Ok(ParamWriteAck {
                 value: accepted,
                 new_revision: revision,
@@ -623,7 +633,7 @@ fn commit_empty_pending_permission_and_all_failures_preserve_persistent_state() 
     for state in &mut states {
         state.value = state.persisted_value.clone().unwrap();
     }
-    let clean = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
+    let mut clean = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
     assert!(clean.commit_dirty(owner()).unwrap().is_none());
 
     let observer = AccessProfile::new(AccessRole::Observer, LeaseState::Active);
@@ -650,13 +660,13 @@ fn commit_empty_pending_permission_and_all_failures_preserve_persistent_state() 
 
     let mut dirty = clean;
     confirm_write(&mut dirty, 1, ParamValue::U32(15), ParamValue::U32(14), 4);
-    let plan = dirty.commit_dirty(owner()).unwrap().unwrap();
     for failure in [
         CommitFailureKind::Storage,
         CommitFailureKind::Verify,
         CommitFailureKind::Device,
         CommitFailureKind::Timeout,
     ] {
+        let plan = dirty.commit_dirty(owner()).unwrap().unwrap();
         assert_eq!(
             dirty.resolve_commit(&plan, Err(failure)).unwrap_err(),
             WorkspaceError::CommitFailed(failure)
@@ -668,6 +678,7 @@ fn commit_empty_pending_permission_and_all_failures_preserve_persistent_state() 
         assert!(dirty.get(1).unwrap().dirty);
         assert_eq!(dirty.storage_generation(), 0);
     }
+    let plan = dirty.commit_dirty(owner()).unwrap().unwrap();
     assert_eq!(
         dirty
             .resolve_commit(
@@ -689,6 +700,100 @@ fn commit_empty_pending_permission_and_all_failures_preserve_persistent_state() 
 }
 
 #[test]
+fn second_entry_commit_failure_preserves_both_dirty_records_atomically() {
+    let (manifest, states) = manifest_and_states();
+    let mut workspace = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
+    let before_first = workspace.get(1).unwrap().clone();
+    let before_second = workspace.get(2).unwrap().clone();
+    let plan = workspace.commit_dirty(owner()).unwrap().unwrap();
+    assert_eq!(
+        plan.entries()
+            .iter()
+            .map(|entry| entry.param_id)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+
+    assert_eq!(
+        workspace
+            .resolve_commit(&plan, Err(CommitFailureKind::Verify))
+            .unwrap_err(),
+        WorkspaceError::CommitFailed(CommitFailureKind::Verify)
+    );
+    assert_eq!(workspace.get(1).unwrap(), &before_first);
+    assert_eq!(workspace.get(2).unwrap(), &before_second);
+    assert_eq!(workspace.dirty_count(), 2);
+    assert_eq!(workspace.storage_generation(), 0);
+
+    let retry = workspace.commit_dirty(owner()).unwrap().unwrap();
+    assert_ne!(retry.operation_token(), plan.operation_token());
+    assert_eq!(retry.entries(), plan.entries());
+}
+
+#[test]
+fn active_commit_blocks_writes_and_requires_the_exact_plan_once() {
+    let (manifest, states) = manifest_and_states();
+    let mut workspace = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
+    let plan = workspace.commit_dirty(owner()).unwrap().unwrap();
+
+    assert_eq!(
+        workspace
+            .queue_write(owner(), 1, ParamValue::U32(30))
+            .unwrap_err(),
+        WorkspaceError::CommitInFlight
+    );
+    assert_eq!(
+        workspace.commit_dirty(owner()).unwrap_err(),
+        WorkspaceError::CommitInFlight
+    );
+
+    workspace
+        .resolve_commit(&plan, Err(CommitFailureKind::Timeout))
+        .unwrap_err();
+    let replacement = workspace.commit_dirty(owner()).unwrap().unwrap();
+    assert_ne!(plan.operation_token(), replacement.operation_token());
+
+    let before = workspace.get(1).unwrap().clone();
+    assert_eq!(
+        workspace
+            .resolve_commit(
+                &plan,
+                Ok(ParamCommitAck {
+                    canonical_crc32: replacement.canonical_crc32(),
+                    storage_generation: 8,
+                }),
+            )
+            .unwrap_err(),
+        WorkspaceError::CommitOperationMismatch
+    );
+    assert_eq!(workspace.get(1).unwrap(), &before);
+
+    workspace
+        .resolve_commit(
+            &replacement,
+            Ok(ParamCommitAck {
+                canonical_crc32: replacement.canonical_crc32(),
+                storage_generation: 8,
+            }),
+        )
+        .unwrap();
+    let committed = workspace.get(1).unwrap().clone();
+    assert_eq!(
+        workspace
+            .resolve_commit(
+                &replacement,
+                Ok(ParamCommitAck {
+                    canonical_crc32: replacement.canonical_crc32(),
+                    storage_generation: 99,
+                }),
+            )
+            .unwrap_err(),
+        WorkspaceError::StaleCommitOperation
+    );
+    assert_eq!(workspace.get(1).unwrap(), &committed);
+}
+
+#[test]
 fn revert_uses_persisted_value_and_current_revision_without_optimistic_mutation() {
     let (manifest, states) = manifest_and_states();
     let mut workspace = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
@@ -702,6 +807,7 @@ fn revert_uses_persisted_value_and_current_revision_without_optimistic_mutation(
     workspace
         .resolve_write(
             1,
+            &pending,
             Ok(ParamWriteAck {
                 value: ParamValue::U32(10),
                 new_revision: 4,
@@ -745,7 +851,7 @@ fn failed_undo_retains_history_and_successful_undo_records_reversible_inverse() 
     assert_eq!(undo.value, ParamValue::U32(10));
     assert_eq!(undo.expected_revision, 4);
     workspace
-        .resolve_write(1, Err(WriteFailure::Ordinary))
+        .resolve_write(1, &undo, Err(WriteFailure::Ordinary))
         .unwrap();
     assert_eq!(workspace.history_snapshot().len(), 1);
     assert_eq!(workspace.get(1).unwrap().ram_value, ParamValue::U32(20));
@@ -757,8 +863,9 @@ fn failed_undo_retains_history_and_successful_undo_records_reversible_inverse() 
     workspace
         .resolve_write(
             1,
+            &undo,
             Ok(ParamWriteAck {
-                value: undo.value,
+                value: undo.value.clone(),
                 new_revision: 5,
             }),
         )
@@ -801,7 +908,7 @@ fn revert_all_reports_partial_failure_and_only_ack_confirmed_device_truth() {
     let mut workspace = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
     let plan = workspace.revert_all(owner()).unwrap();
     assert_eq!(
-        plan.writes
+        plan.writes()
             .iter()
             .map(|write| write.param_id)
             .collect::<Vec<_>>(),
@@ -809,16 +916,19 @@ fn revert_all_reports_partial_failure_and_only_ack_confirmed_device_truth() {
     );
 
     let report = workspace
-        .resolve_revert_all([
-            (
-                1,
-                Ok(ParamWriteAck {
-                    value: ParamValue::U32(10),
-                    new_revision: 4,
-                }),
-            ),
-            (2, Err(WriteFailure::Ordinary)),
-        ])
+        .resolve_revert_all(
+            &plan,
+            [
+                (
+                    plan.writes()[0].clone(),
+                    Ok(ParamWriteAck {
+                        value: ParamValue::U32(10),
+                        new_revision: 4,
+                    }),
+                ),
+                (plan.writes()[1].clone(), Err(WriteFailure::Ordinary)),
+            ],
+        )
         .unwrap();
     assert_eq!(report.confirmed_ids, vec![1]);
     assert_eq!(report.failed_ids, vec![2]);
@@ -826,6 +936,102 @@ fn revert_all_reports_partial_failure_and_only_ack_confirmed_device_truth() {
     assert!(!workspace.get(1).unwrap().dirty);
     assert_eq!(workspace.get(2).unwrap().ram_value, ParamValue::U32(22));
     assert!(workspace.get(2).unwrap().dirty);
+}
+
+#[test]
+fn revert_all_preflight_failure_registers_nothing() {
+    let (mut manifest, states) = manifest_and_states();
+    manifest.parameters[1].flags = ParamFlags::PERSISTENT;
+    let mut workspace = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
+
+    assert_eq!(
+        workspace.revert_all(owner()).unwrap_err(),
+        WorkspaceError::NotRevertible(2)
+    );
+    assert_eq!(workspace.pending_write_count(), 0);
+    assert!(workspace
+        .records()
+        .all(|record| record.write_state == WriteState::Idle));
+}
+
+#[test]
+fn revert_batch_requires_exact_complete_coverage_before_any_result_applies() {
+    let (manifest, states) = manifest_and_states();
+    let mut workspace = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
+    let plan = workspace.revert_all(owner()).unwrap();
+    let first = plan.writes()[0].clone();
+    let second = plan.writes()[1].clone();
+
+    assert_eq!(
+        workspace
+            .queue_write(owner(), 1, ParamValue::U32(30))
+            .unwrap_err(),
+        WorkspaceError::RevertInFlight
+    );
+    assert_eq!(
+        workspace.revert_all(owner()).unwrap_err(),
+        WorkspaceError::RevertInFlight
+    );
+
+    let before_first = workspace.get(1).unwrap().clone();
+    let before_second = workspace.get(2).unwrap().clone();
+    assert_eq!(
+        workspace
+            .resolve_revert_all(
+                &plan,
+                [(
+                    first.clone(),
+                    Ok(ParamWriteAck {
+                        value: ParamValue::U32(10),
+                        new_revision: 4,
+                    })
+                )],
+            )
+            .unwrap_err(),
+        WorkspaceError::RevertCoverageMismatch
+    );
+    assert_eq!(workspace.get(1).unwrap(), &before_first);
+    assert_eq!(workspace.get(2).unwrap(), &before_second);
+    assert_eq!(workspace.pending_write_count(), 2);
+
+    assert_eq!(
+        workspace
+            .resolve_revert_all(
+                &plan,
+                [
+                    (
+                        first.clone(),
+                        Ok(ParamWriteAck {
+                            value: ParamValue::U32(10),
+                            new_revision: 4,
+                        })
+                    ),
+                    (first, Err(WriteFailure::Ordinary)),
+                ],
+            )
+            .unwrap_err(),
+        WorkspaceError::RevertCoverageMismatch
+    );
+    assert_eq!(workspace.get(1).unwrap(), &before_first);
+    assert_eq!(workspace.get(2).unwrap(), &before_second);
+
+    let report = workspace
+        .resolve_revert_all(
+            &plan,
+            [
+                (
+                    plan.writes()[0].clone(),
+                    Ok(ParamWriteAck {
+                        value: ParamValue::U32(10),
+                        new_revision: 4,
+                    }),
+                ),
+                (second, Err(WriteFailure::Ordinary)),
+            ],
+        )
+        .unwrap();
+    assert_eq!(report.confirmed_ids, vec![1]);
+    assert_eq!(report.failed_ids, vec![2]);
 }
 
 #[test]
@@ -901,8 +1107,9 @@ fn disconnect_clears_pending_and_history_then_reconnect_replaces_device_truth() 
 fn malformed_ack_type_preserves_confirmed_values_and_clears_pending_state() {
     let (manifest, states) = manifest_and_states();
     let mut workspace = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
-    workspace
+    let pending = workspace
         .queue_write(owner(), 1, ParamValue::U32(15))
+        .unwrap()
         .unwrap();
     workspace
         .queue_write(owner(), 1, ParamValue::U32(16))
@@ -912,6 +1119,7 @@ fn malformed_ack_type_preserves_confirmed_values_and_clears_pending_state() {
         workspace
             .resolve_write(
                 1,
+                &pending,
                 Ok(ParamWriteAck {
                     value: ParamValue::I32(15),
                     new_revision: 99,
@@ -926,4 +1134,106 @@ fn malformed_ack_type_preserves_confirmed_values_and_clears_pending_state() {
     assert_eq!(record.revision, 3);
     assert_eq!(record.write_state, WriteState::Idle);
     assert_eq!(workspace.pending_write_count(), 0);
+}
+
+#[test]
+fn write_resolution_requires_exact_operation_and_rejects_stale_wrong_id_and_old_generation() {
+    let (manifest, states) = manifest_and_states();
+    let mut workspace = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
+    let pending = workspace
+        .queue_write(owner(), 1, ParamValue::U32(15))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        workspace
+            .resolve_write(
+                2,
+                &pending,
+                Ok(ParamWriteAck {
+                    value: ParamValue::U32(15),
+                    new_revision: 4,
+                }),
+            )
+            .unwrap_err(),
+        WorkspaceError::WriteOperationMismatch
+    );
+    assert_eq!(workspace.get(1).unwrap().ram_value, ParamValue::U32(11));
+    assert_eq!(workspace.pending_write_count(), 1);
+
+    workspace
+        .resolve_write(
+            1,
+            &pending,
+            Ok(ParamWriteAck {
+                value: ParamValue::U32(15),
+                new_revision: 4,
+            }),
+        )
+        .unwrap();
+    let confirmed = workspace.get(1).unwrap().clone();
+    assert_eq!(
+        workspace
+            .resolve_write(
+                1,
+                &pending,
+                Ok(ParamWriteAck {
+                    value: ParamValue::U32(99),
+                    new_revision: 99,
+                }),
+            )
+            .unwrap_err(),
+        WorkspaceError::StaleWriteOperation
+    );
+    assert_eq!(workspace.get(1).unwrap(), &confirmed);
+
+    let old_generation = workspace
+        .queue_write(owner(), 1, ParamValue::U32(16))
+        .unwrap()
+        .unwrap();
+    workspace.mark_disconnected();
+    let connected = ConnectedDevice {
+        phase: ConnectionPhase::Ready,
+        session_id: 901,
+        negotiated_max_payload: 1_024,
+        identity: DeviceIdentity {
+            device_id: [7; 16],
+            boot_count: 3,
+            firmware_version: [3, 0, 0],
+            sdk_version: [1, 0, 0],
+            capabilities: CapabilityFlags::PARAMETERS | CapabilityFlags::PERSISTENCE,
+        },
+        manifest: manifest.clone(),
+        parameter_states: states.clone(),
+        diagnostics: DiagnosticsSnapshot::default(),
+    };
+    workspace.replace_from_connected(&connected).unwrap();
+    let replacement = workspace.get(1).unwrap().clone();
+    assert_eq!(
+        workspace
+            .resolve_write(
+                1,
+                &old_generation,
+                Ok(ParamWriteAck {
+                    value: ParamValue::U32(77),
+                    new_revision: 77,
+                }),
+            )
+            .unwrap_err(),
+        WorkspaceError::OldWorkspaceGeneration
+    );
+    assert_eq!(workspace.get(1).unwrap(), &replacement);
+
+    let after_reconnect = workspace
+        .queue_write(owner(), 1, ParamValue::U32(17))
+        .unwrap()
+        .unwrap();
+    assert_ne!(
+        old_generation.operation_token(),
+        after_reconnect.operation_token()
+    );
+    assert_ne!(
+        old_generation.workspace_generation(),
+        after_reconnect.workspace_generation()
+    );
 }

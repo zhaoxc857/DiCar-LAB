@@ -8,8 +8,8 @@ use dctp_protocol::{
 };
 
 use crate::{
-    Clock, ConnectedDevice, ConnectionPhase, CoreError, DeviceIdentity, DiagnosticsSnapshot,
-    NonceSource, Transport,
+    Clock, CommitPlan, ConnectedDevice, ConnectionPhase, CoreError, DeviceIdentity,
+    DiagnosticsSnapshot, NonceSource, ParameterWorkspace, PendingWrite, Transport,
 };
 
 const ORDINARY_TIMEOUT_MS: u64 = 300;
@@ -171,6 +171,20 @@ impl<T: Transport> ProtocolSession<T> {
         message_type: MessageType,
         payload: Vec<u8>,
     ) -> Result<Frame, CoreError> {
+        if matches!(
+            message_type,
+            MessageType::ParamWrite | MessageType::ParamCommit
+        ) {
+            return Err(CoreError::UnauthorizedParameterOperation);
+        }
+        self.request_internal(message_type, payload)
+    }
+
+    fn request_internal(
+        &mut self,
+        message_type: MessageType,
+        payload: Vec<u8>,
+    ) -> Result<Frame, CoreError> {
         self.ensure_writable_session()?;
         let expected = response_type(message_type).ok_or(ProtocolError::InvalidValue)?;
         let (timeout_ms, attempts) = request_policy(message_type);
@@ -185,7 +199,7 @@ impl<T: Transport> ProtocolSession<T> {
         )
     }
 
-    pub fn write_parameter(
+    fn write_parameter(
         &mut self,
         param_id: u32,
         expected_revision: u32,
@@ -197,7 +211,7 @@ impl<T: Transport> ProtocolSession<T> {
             value,
         }
         .encode()?;
-        match self.request(MessageType::ParamWrite, payload) {
+        match self.request_internal(MessageType::ParamWrite, payload) {
             Ok(response) => Ok(ParamWriteAck::decode(&response.payload)?),
             Err(CoreError::Device {
                 code: ErrorCode::RevisionConflict,
@@ -210,9 +224,31 @@ impl<T: Transport> ProtocolSession<T> {
         }
     }
 
-    pub fn commit_parameters(&mut self, commit: &ParamCommit) -> Result<ParamCommitAck, CoreError> {
-        let response = self.request(MessageType::ParamCommit, commit.encode()?)?;
+    fn commit_parameters(&mut self, commit: &ParamCommit) -> Result<ParamCommitAck, CoreError> {
+        let response = self.request_internal(MessageType::ParamCommit, commit.encode()?)?;
         Ok(ParamCommitAck::decode(&response.payload)?)
+    }
+
+    pub fn execute_write(
+        &mut self,
+        workspace: &ParameterWorkspace,
+        operation: &PendingWrite,
+    ) -> Result<ParamWriteAck, CoreError> {
+        workspace.validate_pending_execution(operation)?;
+        self.write_parameter(
+            operation.param_id,
+            operation.expected_revision,
+            operation.value.clone(),
+        )
+    }
+
+    pub fn execute_commit(
+        &mut self,
+        workspace: &ParameterWorkspace,
+        plan: &CommitPlan,
+    ) -> Result<ParamCommitAck, CoreError> {
+        workspace.validate_commit_execution(plan)?;
+        self.commit_parameters(&plan.to_protocol_commit())
     }
 
     pub fn poll(&mut self) -> Result<(), CoreError> {
