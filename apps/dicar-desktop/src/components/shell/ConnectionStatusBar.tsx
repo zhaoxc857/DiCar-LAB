@@ -74,7 +74,7 @@ export function ConnectionStatusBar() {
   }
 
   const pendingEndpoint = mode === "simulator"
-    ? "TCP 127.0.0.1:7100 · 模拟器"
+    ? "内置模拟器 · 等待连接"
     : selectedPort ? `${selectedPort} @ ${baudRate}` : "等待选择 COM";
 
   return (

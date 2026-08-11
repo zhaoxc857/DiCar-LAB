@@ -3,6 +3,7 @@
 mod app_state;
 mod channel_forwarder;
 mod commands;
+mod simulator_runtime;
 mod window_guard;
 
 pub use app_state::{AppState, BridgeErrorDto};
@@ -12,6 +13,7 @@ pub use channel_forwarder::{
 pub use commands::{connect_core, list_serial_ports_core, EndpointDto};
 #[cfg(any(target_env = "msvc", feature = "native-check"))]
 pub use commands::{AccessProfileId, ParameterValueDto};
+pub use simulator_runtime::{spawn_bundled_runtime, BundledSimulator};
 pub use window_guard::{CloseDecision, CloseRequestOutcome, CloseResolution};
 
 use window_guard::WindowCloseCoordinator;
@@ -40,16 +42,13 @@ pub fn command_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
 
 #[cfg(target_env = "msvc")]
 pub fn run() {
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use tauri::Manager;
 
-    let state = AppState::spawn(dicar_app_core::CoreConfig::simulator(SocketAddr::new(
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-        7100,
-    )))
-    .unwrap_or_else(|error| panic!("failed to start DiCar app core: {}", error.message));
+    let (simulator, state) = spawn_bundled_runtime()
+        .unwrap_or_else(|error| panic!("failed to start DiCar runtime: {}", error.message));
 
     tauri::Builder::default()
+        .manage(simulator)
         .manage(state)
         .invoke_handler(command_handler())
         .on_window_event(|window, event| {

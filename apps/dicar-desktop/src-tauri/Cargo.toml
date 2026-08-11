@@ -1,6 +1,6 @@
 [package]
 name = "dicar-desktop"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -14,6 +14,7 @@ name = "dicar-desktop"
 path = "src/main.rs"
 
 [dependencies]
+dctp-sim = { path = "../../../crates/dctp-sim" }
 dicar-app-core = { path = "../../../crates/dicar-app-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -28,6 +29,3 @@ tauri = { version = "2", features = [] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-
-[dev-dependencies]
-dctp-sim = { path = "../../../crates/dctp-sim" }

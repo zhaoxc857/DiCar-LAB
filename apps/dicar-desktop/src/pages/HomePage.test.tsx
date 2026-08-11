@@ -21,9 +21,11 @@ it("renders the B-style menu and connects the real simulator destination", async
   expect(screen.getByText("本地演示权限")).toBeInTheDocument();
   expect(screen.getByText("未连接")).toBeInTheDocument();
   expect(screen.getByLabelText("连接方式")).toHaveValue("simulator");
+  expect(screen.getByText("DCTP v1 · 模拟器待连接")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
   expect(await screen.findByText("已就绪")).toBeInTheDocument();
+  expect(screen.getByText("DCTP v1 · 模拟器已连接")).toBeInTheDocument();
   expect(screen.getByText("16 个遥测通道")).toBeInTheDocument();
   expect(screen.getByText("19 个参数")).toBeInTheDocument();
 });

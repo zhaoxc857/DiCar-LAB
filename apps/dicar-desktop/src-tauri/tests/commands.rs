@@ -6,8 +6,8 @@ use dicar_app_core::{
     OperationStatus, SnapshotPhase,
 };
 use dicar_desktop_lib::{
-    connect_core, list_serial_ports_core, AppState, EndpointDto, FrontendEvent,
-    FrontendEventPayload, FrontendEventSequencer, FrontendSink,
+    connect_core, list_serial_ports_core, spawn_bundled_runtime, AppState, EndpointDto,
+    FrontendEvent, FrontendEventPayload, FrontendEventSequencer, FrontendSink,
 };
 
 #[derive(Default)]
@@ -16,7 +16,26 @@ struct RecordingSink {
 }
 
 #[test]
-fn typed_connect_switches_runtime_endpoints_and_validates_serial_before_dispatch() {
+fn bundled_runtime_connects_to_its_own_simulator_without_an_external_service() {
+    let (simulator, state) = spawn_bundled_runtime().unwrap();
+    let advertised = EndpointDto::Simulator {
+        address: "127.0.0.1:1".into(),
+    };
+
+    let result = connect_core(&state, advertised).unwrap();
+
+    assert_eq!(result.status, OperationStatus::Succeeded);
+    assert_eq!(state.snapshot().phase, SnapshotPhase::Ready);
+    assert_eq!(
+        state.snapshot().transport_identity.unwrap().endpoint,
+        dicar_app_core::Endpoint::Simulator {
+            address: simulator.local_addr()
+        }
+    );
+}
+
+#[test]
+fn typed_connect_routes_simulator_to_the_configured_runtime_and_validates_serial() {
     let configured_server = SimulatorServer::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
     let selected_server = SimulatorServer::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
     let state = AppState::spawn(CoreConfig::simulator(configured_server.local_addr())).unwrap();
@@ -35,7 +54,7 @@ fn typed_connect_switches_runtime_endpoints_and_validates_serial_before_dispatch
         snapshot["transportIdentity"]["endpoint"],
         serde_json::json!({
             "kind": "simulator",
-            "address": selected_server.local_addr().to_string()
+            "address": configured_server.local_addr().to_string()
         })
     );
     state.dispatch(CoreCommand::Disconnect).unwrap();

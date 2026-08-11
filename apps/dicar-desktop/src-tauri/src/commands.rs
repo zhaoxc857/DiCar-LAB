@@ -127,7 +127,11 @@ pub fn connect_core(
     state: &AppState,
     endpoint: EndpointDto,
 ) -> Result<OperationResult, BridgeErrorDto> {
-    let endpoint = endpoint.into_core()?;
+    let requested = endpoint.into_core()?;
+    let endpoint = match (&requested, state.configured_endpoint()) {
+        (Endpoint::Simulator { .. }, configured @ Endpoint::Simulator { .. }) => configured.clone(),
+        _ => requested,
+    };
     state.dispatch(CoreCommand::ConnectTo { endpoint })
 }
 
