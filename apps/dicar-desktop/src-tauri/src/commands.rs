@@ -24,8 +24,14 @@ use tauri::{ipc::Channel, State, WebviewWindow};
     rename_all_fields = "camelCase"
 )]
 pub enum EndpointDto {
-    Simulator { address: String },
-    Serial { port_name: String, baud_rate: u32 },
+    Simulator {
+        address: String,
+    },
+    Serial {
+        port_name: String,
+        baud_rate: u32,
+        hardware_profile: SerialHardwareProfile,
+    },
 }
 
 impl EndpointDto {
@@ -40,20 +46,22 @@ impl EndpointDto {
             Self::Serial {
                 port_name,
                 baud_rate,
+                hardware_profile,
             } => {
                 if port_name.trim().is_empty() {
                     return Err(BridgeErrorDto::new("invalidEndpoint", "请选择一个真实串口"));
                 }
-                if ![115_200, 460_800, 921_600].contains(&baud_rate) {
+                if ![9_600, 38_400, 57_600, 115_200, 230_400, 460_800, 921_600].contains(&baud_rate)
+                {
                     return Err(BridgeErrorDto::new(
                         "invalidEndpoint",
-                        "波特率必须是 115200、460800 或 921600",
+                        "波特率必须是 9600、38400、57600、115200、230400、460800 或 921600",
                     ));
                 }
                 Ok(Endpoint::Serial {
                     port_name,
                     baud_rate,
-                    hardware_profile: SerialHardwareProfile::GenericSerial,
+                    hardware_profile,
                 })
             }
         }

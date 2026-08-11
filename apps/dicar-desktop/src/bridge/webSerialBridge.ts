@@ -67,6 +67,7 @@ export class WebSerialBridge extends MockBridge {
       displayName: `Web Serial ${usbLabel}`,
       vendorId,
       productId,
+      portKind: "usb",
     };
   }
 }

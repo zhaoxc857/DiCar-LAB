@@ -1,12 +1,21 @@
 export type Endpoint =
   | { kind: "simulator"; address: string }
-  | { kind: "serial"; portName: string; baudRate: number };
+  | {
+      kind: "serial";
+      portName: string;
+      baudRate: number;
+      hardwareProfile: SerialHardwareProfile;
+    };
+
+export type SerialHardwareProfile = "nanoUartWl" | "hc05BluetoothSpp" | "genericSerial";
+export type SerialPortKind = "usb" | "bluetooth" | "pci" | "unknown";
 
 export interface SerialPortDescriptor {
   portName: string;
   displayName: string;
   vendorId: number | null;
   productId: number | null;
+  portKind: SerialPortKind;
 }
 
 export function endpointLabel(endpoint: Endpoint | null): string {

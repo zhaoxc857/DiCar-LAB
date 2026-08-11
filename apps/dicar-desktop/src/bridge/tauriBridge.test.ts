@@ -69,7 +69,7 @@ it("maps typed bridge calls to the exact Tauri commands and arguments", async ()
 
   await bridge.connect(endpoint);
   tauri.invoke.mockResolvedValueOnce([
-    { portName: "COM7", displayName: "无线 DAP", vendorId: 0x1a86, productId: 0x7523 },
+    { portName: "COM7", displayName: "无线 DAP", vendorId: 0x1a86, productId: 0x7523, portKind: "usb" },
   ]);
   const ports = await bridge.listSerialPorts();
   await bridge.writeParameter(1, value);

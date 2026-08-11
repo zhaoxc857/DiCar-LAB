@@ -629,7 +629,7 @@ impl ActorRuntime {
         self.set_phase(SnapshotPhase::Connecting);
         self.config.endpoint = endpoint.clone();
         let transport = ActiveTransport::connect(&endpoint).map_err(|error| error.to_string())?;
-        self.transport_identity = Some(transport.identity());
+        let transport_identity = transport.identity();
         let mut session =
             ProtocolSession::new(transport, SystemNonce::default(), SystemClock::new());
         let connected = session
@@ -643,6 +643,7 @@ impl ActorRuntime {
         self.workspace = Some(workspace);
         self.device = Some(connected);
         self.session = Some(session);
+        self.transport_identity = Some(transport_identity);
         self.last_disconnect_reason = None;
         self.paused = false;
         self.active_subscription = None;

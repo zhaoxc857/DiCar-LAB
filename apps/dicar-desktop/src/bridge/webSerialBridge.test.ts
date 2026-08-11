@@ -45,12 +45,14 @@ it("lists granted ports and registers a newly authorized browser port", async ()
       displayName: "Web Serial USB 1a86:7523",
       vendorId: 0x1a86,
       productId: 0x7523,
+      portKind: "usb",
     },
   ]);
   expect(await bridge.requestSerialPort()).toMatchObject({
     portName: "WEB-SERIAL-2",
     vendorId: 0x303a,
     productId: 0x1001,
+    portKind: "usb",
   });
 });
 
@@ -63,6 +65,7 @@ it("opens the selected browser port but refuses to claim ready before DCTP is im
     kind: "serial",
     portName: descriptor.portName,
     baudRate: 921600,
+    hardwareProfile: "genericSerial",
   });
 
   expect(port.openedWith).toBe(921600);

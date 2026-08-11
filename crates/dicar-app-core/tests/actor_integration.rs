@@ -1,9 +1,10 @@
+use std::net::{Shutdown, TcpListener};
 use std::time::{Duration, Instant};
 
 use dctp_sim::SimulatorServer;
 use dicar_app_core::{
-    AppActorHandle, CoreCommand, CoreConfig, CoreEventPayload, OperationStatus, ParamValueDto,
-    SnapshotPhase,
+    AppActorHandle, CoreCommand, CoreConfig, CoreEventPayload, Endpoint, OperationStatus,
+    ParamValueDto, SnapshotPhase,
 };
 
 fn wait_until(timeout: Duration, predicate: impl Fn() -> bool) {
@@ -15,6 +16,39 @@ fn wait_until(timeout: Duration, predicate: impl Fn() -> bool) {
         std::thread::sleep(Duration::from_millis(5));
     }
     panic!("actor condition did not become true within {timeout:?}");
+}
+
+#[test]
+fn failed_protocol_handshake_does_not_leave_a_connected_transport_identity() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let peer = std::thread::spawn(move || {
+        let (socket, _) = listener.accept().unwrap();
+        socket.shutdown(Shutdown::Both).unwrap();
+    });
+    let actor = AppActorHandle::spawn(CoreConfig::simulator(address)).unwrap();
+    let events = actor.subscribe().unwrap();
+
+    let operation_id = actor
+        .send(CoreCommand::ConnectTo {
+            endpoint: Endpoint::Simulator { address },
+        })
+        .unwrap();
+    let result = loop {
+        let event = events.recv_timeout(Duration::from_secs(2)).unwrap();
+        if let CoreEventPayload::OperationCompleted(result) = event.payload {
+            if result.operation_id == operation_id {
+                break result;
+            }
+        }
+    };
+
+    assert_eq!(result.status, OperationStatus::Failed);
+    assert_eq!(actor.snapshot().phase, SnapshotPhase::Disconnected);
+    assert_eq!(actor.snapshot().transport_identity, None);
+
+    actor.shutdown().unwrap();
+    peer.join().unwrap();
 }
 
 #[test]

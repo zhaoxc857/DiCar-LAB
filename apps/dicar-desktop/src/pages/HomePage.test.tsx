@@ -44,7 +44,7 @@ it("separates the real serial path and never reports a web preview as hardware",
   expect(screen.getByRole("button", { name: "连接真实设备" })).toBeDisabled();
   expect(screen.getByText("未连接")).toBeInTheDocument();
 
-  const result = await bridge.connect({ kind: "serial", portName: "COM7", baudRate: 921600 });
+  const result = await bridge.connect({ kind: "serial", portName: "COM7", baudRate: 921600, hardwareProfile: "genericSerial" });
   expect(result).toMatchObject({ status: "failed" });
   expect((await bridge.getSnapshot()).phase).toBe("disconnected");
 });

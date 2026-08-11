@@ -1,10 +1,10 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const NANO_UART_WL_BAUD_RATES: [u32; 3] = [460_800, 230_400, 115_200];
 const HC05_BAUD_RATES: [u32; 6] = [115_200, 9_600, 38_400, 57_600, 230_400, 460_800];
 const GENERIC_BAUD_RATES: [u32; 1] = [115_200];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SerialHardwareProfile {
     NanoUartWl,

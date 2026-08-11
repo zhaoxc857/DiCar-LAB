@@ -1,12 +1,16 @@
 import { CircleNotch, LinkBreak, PlugsConnected } from "@phosphor-icons/react";
 import { useState } from "react";
 import { useDesktopBridge } from "../../app/providers";
-import { endpointLabel, type Endpoint, type SerialPortDescriptor } from "../../domain/types";
+import { HARDWARE_PROFILES, SUPPORTED_SERIAL_BAUD_RATES } from "../../domain/hardwareProfiles";
+import { connectSerialWithProbe } from "../../domain/serialConnection";
+import { endpointLabel, type Endpoint, type SerialHardwareProfile, type SerialPortDescriptor } from "../../domain/types";
 import { connectionLabel, useConnectionStore } from "../../stores/connectionStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { Alert } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Select } from "../ui/select";
+import { HardwareConnectionGuide } from "./HardwareConnectionGuide";
 
 type ConnectionMode = Endpoint["kind"];
 
@@ -15,12 +19,18 @@ export function ConnectionStatusBar() {
   const snapshot = useConnectionStore((state) => state.snapshot);
   const hydrated = useConnectionStore((state) => state.hydrated);
   const eventError = useConnectionStore((state) => state.eventError);
+  const savedProfile = useSettingsStore((state) => state.serialHardwareProfile);
+  const savedPort = useSettingsStore((state) => state.serialPortName);
+  const savedBaudRate = useSettingsStore((state) => state.serialBaudRate);
+  const saveSerialConnection = useSettingsStore((state) => state.saveSerialConnection);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ConnectionMode>("simulator");
   const [serialPorts, setSerialPorts] = useState<SerialPortDescriptor[]>([]);
-  const [selectedPort, setSelectedPort] = useState("");
-  const [baudRate, setBaudRate] = useState(921_600);
+  const [selectedPort, setSelectedPort] = useState(savedPort);
+  const [hardwareProfile, setHardwareProfile] = useState<SerialHardwareProfile>(savedProfile);
+  const [baudRate, setBaudRate] = useState<number | "auto">(savedBaudRate);
+  const [probingRate, setProbingRate] = useState<number | null>(null);
   const ready = snapshot?.phase === "ready";
 
   async function selectMode(next: ConnectionMode) {
@@ -30,8 +40,8 @@ export function ConnectionStatusBar() {
     try {
       const ports = await bridge.listSerialPorts();
       setSerialPorts(ports);
-      setSelectedPort((current) => current || ports[0]?.portName || "");
-      if (ports.length === 0) setError("未发现可用串口，请检查无线调试器 USB 连接");
+      setSelectedPort((current) => current && ports.some(({ portName }) => portName === current) ? current : ports[0]?.portName || "");
+      if (ports.length === 0) setError("未发现可用串口，请检查无线模块或 Windows 蓝牙配对");
     } catch (reason) {
       setSerialPorts([]);
       setSelectedPort("");
@@ -43,15 +53,30 @@ export function ConnectionStatusBar() {
     setBusy(true);
     setError(null);
     try {
-      const endpoint: Endpoint = mode === "simulator"
-        ? { kind: "simulator", address: "127.0.0.1:7100" }
-        : { kind: "serial", portName: selectedPort, baudRate };
-      const result = ready ? await bridge.disconnect() : await bridge.connect(endpoint);
-      if (result.status === "failed") setError(result.message);
+      if (ready) {
+        const result = await bridge.disconnect();
+        if (result.status === "failed") setError(result.message);
+      } else if (mode === "simulator") {
+        const result = await bridge.connect({ kind: "simulator", address: "127.0.0.1:7100" });
+        if (result.status === "failed") setError(result.message);
+      } else {
+        const result = await connectSerialWithProbe(
+          bridge,
+          { hardwareProfile, portName: selectedPort, baudRate },
+          setProbingRate,
+        );
+        if (result.operation.status === "failed") {
+          setError(`${result.operation.message}（已尝试 ${result.attemptedBaudRates.join("、")} baud）`);
+        } else if (result.baudRate !== null) {
+          setBaudRate(result.baudRate);
+          saveSerialConnection(hardwareProfile, selectedPort, result.baudRate);
+        }
+      }
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
       setBusy(false);
+      setProbingRate(null);
     }
   }
 
@@ -61,10 +86,7 @@ export function ConnectionStatusBar() {
     setError(null);
     try {
       const port = await bridge.requestSerialPort();
-      setSerialPorts((current) => [
-        ...current.filter(({ portName }) => portName !== port.portName),
-        port,
-      ]);
+      setSerialPorts((current) => [...current.filter(({ portName }) => portName !== port.portName), port]);
       setSelectedPort(port.portName);
     } catch (reason) {
       setError(errorMessage(reason));
@@ -73,9 +95,15 @@ export function ConnectionStatusBar() {
     }
   }
 
+  function changeHardwareProfile(next: SerialHardwareProfile) {
+    setHardwareProfile(next);
+    setBaudRate("auto");
+    setError(null);
+  }
+
   const pendingEndpoint = mode === "simulator"
     ? "内置模拟器 · 等待连接"
-    : selectedPort ? `${selectedPort} @ ${baudRate}` : "等待选择 COM";
+    : selectedPort ? `${selectedPort} @ ${baudRate === "auto" ? "自动探测" : baudRate}` : "等待选择 COM";
 
   return (
     <>
@@ -98,25 +126,26 @@ export function ConnectionStatusBar() {
           </Select>
           {mode === "serial" && (
             <>
+              <Select aria-label="硬件类型" className="h-8 w-36 text-xs" disabled={ready || busy} onChange={(event) => changeHardwareProfile(event.currentTarget.value as SerialHardwareProfile)} value={hardwareProfile}>
+                {(Object.entries(HARDWARE_PROFILES) as Array<[SerialHardwareProfile, (typeof HARDWARE_PROFILES)[SerialHardwareProfile]]>).map(([value, profile]) => <option key={value} value={value}>{profile.label}</option>)}
+              </Select>
               <Select aria-label="选择串口" className="h-8 w-40 font-mono text-xs" disabled={ready || busy || serialPorts.length === 0} onChange={(event) => setSelectedPort(event.currentTarget.value)} value={selectedPort}>
                 <option value="">选择 COM</option>
-                {serialPorts.map((port) => <option key={port.portName} value={port.portName}>{port.portName} · {port.displayName}</option>)}
+                {serialPorts.map((port) => <option key={port.portName} value={port.portName}>{port.portName} · {port.portKind === "bluetooth" ? "蓝牙 · " : ""}{port.displayName}</option>)}
               </Select>
-              <Select aria-label="串口波特率" className="h-8 w-28 font-mono text-xs" disabled={ready || busy} onChange={(event) => setBaudRate(Number(event.currentTarget.value))} value={baudRate}>
-                {[921600, 460800, 115200].map((rate) => <option key={rate} value={rate}>{rate}</option>)}
+              <Select aria-label="串口波特率" className="h-8 w-28 font-mono text-xs" disabled={ready || busy} onChange={(event) => setBaudRate(event.currentTarget.value === "auto" ? "auto" : Number(event.currentTarget.value))} value={baudRate}>
+                <option value="auto">自动探测</option>
+                {SUPPORTED_SERIAL_BAUD_RATES.map((rate) => <option key={rate} value={rate}>{rate}</option>)}
               </Select>
-              {bridge.serialAccessMode === "browser" && (
-                <Button disabled={ready || busy} onClick={() => void authorizeBrowserPort()} size="sm" variant="secondary">
-                  授权浏览器串口
-                </Button>
-              )}
+              {bridge.serialAccessMode === "browser" && <Button disabled={ready || busy} onClick={() => void authorizeBrowserPort()} size="sm" variant="secondary">授权浏览器串口</Button>}
             </>
           )}
           <Button disabled={busy || (!ready && mode === "serial" && selectedPort === "")} onClick={() => void toggleConnection()} size="sm" variant={ready ? "secondary" : "primary"}>
-            {ready ? "断开设备" : mode === "serial" ? "连接真实设备" : "连接模拟器"}
+            {ready ? "断开设备" : probingRate !== null ? `正在探测 ${probingRate}` : mode === "serial" ? "连接真实设备" : "连接模拟器"}
           </Button>
         </div>
       </section>
+      {mode === "serial" && !ready && <HardwareConnectionGuide profile={hardwareProfile} />}
       {(error ?? eventError) && <div className="px-4 pt-3 lg:px-6"><Alert>{error ?? eventError}</Alert></div>}
     </>
   );

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use dctp_sim::SimulatorServer;
 use dicar_app_core::{
     CoreCommand, CoreConfig, CoreEvent, CoreEventPayload, OperationId, OperationResult,
-    OperationStatus, SnapshotPhase,
+    OperationStatus, SerialHardwareProfile, SnapshotPhase,
 };
 use dicar_desktop_lib::{
     connect_core, list_serial_ports_core, spawn_bundled_runtime, AppState, EndpointDto,
@@ -62,7 +62,8 @@ fn typed_connect_routes_simulator_to_the_configured_runtime_and_validates_serial
     let serial: EndpointDto = serde_json::from_value(serde_json::json!({
         "kind": "serial",
         "portName": "",
-        "baudRate": 921600
+        "baudRate": 921600,
+        "hardwareProfile": "genericSerial"
     }))
     .unwrap();
     let error = connect_core(&state, serial).unwrap_err();
@@ -72,6 +73,26 @@ fn typed_connect_routes_simulator_to_the_configured_runtime_and_validates_serial
     drop(state);
     configured_server.shutdown().unwrap();
     selected_server.shutdown().unwrap();
+}
+
+#[test]
+fn serial_endpoint_dto_accepts_hc05_profile_and_low_data_mode_baud() {
+    let serial: EndpointDto = serde_json::from_value(serde_json::json!({
+        "kind": "serial",
+        "portName": "COM12",
+        "baudRate": 9600,
+        "hardwareProfile": "hc05BluetoothSpp"
+    }))
+    .unwrap();
+
+    assert!(matches!(
+        serial,
+        EndpointDto::Serial {
+            port_name,
+            baud_rate: 9_600,
+            hardware_profile: SerialHardwareProfile::Hc05BluetoothSpp,
+        } if port_name == "COM12"
+    ));
 }
 
 #[test]
