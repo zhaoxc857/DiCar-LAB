@@ -1,7 +1,7 @@
 use std::fmt;
 use std::io;
 
-use dctp_protocol::{ErrorCode, MessageType, ProtocolError};
+use dctp_protocol::{ErrorCode, MessageType, ParamWriteAck, ProtocolError};
 
 #[derive(Debug)]
 pub enum TransportError {
@@ -43,6 +43,9 @@ pub enum CoreError {
         code: ErrorCode,
         context: String,
     },
+    RevisionConflict {
+        current: ParamWriteAck,
+    },
     Timeout {
         message_type: MessageType,
         attempts: u8,
@@ -62,6 +65,7 @@ impl fmt::Display for CoreError {
             Self::Device { code, context, .. } => {
                 write!(formatter, "device error {code:?}: {context}")
             }
+            Self::RevisionConflict { .. } => formatter.write_str("parameter revision conflict"),
             Self::Timeout {
                 message_type,
                 attempts,

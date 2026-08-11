@@ -2,8 +2,9 @@ use std::collections::VecDeque;
 
 use dctp_protocol::{
     encode_frame, DeviceManifest, ErrorCode, ErrorPayload, Frame, FrameFlags, Heartbeat, Hello,
-    HelloAck, ManifestAssembler, ManifestChunk, ManifestDone, MessageType, ParamRead, ParamState,
-    ProtocolError, StreamDecoder, WireDecode, WireEncode, MAX_PAYLOAD_LEN,
+    HelloAck, ManifestAssembler, ManifestChunk, ManifestDone, MessageType, ParamCommit,
+    ParamCommitAck, ParamRead, ParamState, ParamValue, ParamWrite, ParamWriteAck, ProtocolError,
+    StreamDecoder, WireDecode, WireEncode, MAX_PAYLOAD_LEN,
 };
 
 use crate::{
@@ -182,6 +183,36 @@ impl<T: Transport> ProtocolSession<T> {
             attempts,
             false,
         )
+    }
+
+    pub fn write_parameter(
+        &mut self,
+        param_id: u32,
+        expected_revision: u32,
+        value: ParamValue,
+    ) -> Result<ParamWriteAck, CoreError> {
+        let payload = ParamWrite {
+            param_id,
+            expected_revision,
+            value,
+        }
+        .encode()?;
+        match self.request(MessageType::ParamWrite, payload) {
+            Ok(response) => Ok(ParamWriteAck::decode(&response.payload)?),
+            Err(CoreError::Device {
+                code: ErrorCode::RevisionConflict,
+                context,
+                ..
+            }) => Err(CoreError::RevisionConflict {
+                current: decode_revision_conflict_context(&context)?,
+            }),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn commit_parameters(&mut self, commit: &ParamCommit) -> Result<ParamCommitAck, CoreError> {
+        let response = self.request(MessageType::ParamCommit, commit.encode()?)?;
+        Ok(ParamCommitAck::decode(&response.payload)?)
     }
 
     pub fn poll(&mut self) -> Result<(), CoreError> {
@@ -536,6 +567,34 @@ impl<T: Transport> ProtocolSession<T> {
             self.diagnostics.unsolicited_dropped += 1;
         }
         self.unsolicited.push_back(frame);
+    }
+}
+
+pub fn decode_revision_conflict_context(context: &str) -> Result<ParamWriteAck, CoreError> {
+    if context.len() % 2 != 0
+        || context
+            .bytes()
+            .any(|value| !value.is_ascii_digit() && !(b'a'..=b'f').contains(&value))
+    {
+        return Err(ProtocolError::InvalidValue.into());
+    }
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve(context.len() / 2)
+        .map_err(|_| ProtocolError::InvalidLength)?;
+    for pair in context.as_bytes().chunks_exact(2) {
+        let high = decode_lower_hex_nibble(pair[0]).ok_or(ProtocolError::InvalidValue)?;
+        let low = decode_lower_hex_nibble(pair[1]).ok_or(ProtocolError::InvalidValue)?;
+        bytes.push((high << 4) | low);
+    }
+    Ok(ParamWriteAck::decode(&bytes)?)
+}
+
+fn decode_lower_hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        _ => None,
     }
 }
 
