@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "apps/dicar-desktop/src-tauri"]
 resolver = "2"
 
 [workspace.package]

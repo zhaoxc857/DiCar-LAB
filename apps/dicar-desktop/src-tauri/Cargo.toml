@@ -1,0 +1,33 @@
+[package]
+name = "dicar-desktop"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "dicar_desktop_lib"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "dicar-desktop"
+path = "src/main.rs"
+
+[dependencies]
+dicar-app-core = { path = "../../../crates/dicar-app-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [], optional = true }
+
+[features]
+default = []
+native-check = ["dep:tauri"]
+
+[target.'cfg(target_env = "msvc")'.dependencies]
+tauri = { version = "2", features = [] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+dctp-sim = { path = "../../../crates/dctp-sim" }

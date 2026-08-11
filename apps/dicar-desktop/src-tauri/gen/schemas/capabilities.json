@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"DiCar main window core invoke and Channel access only","local":true,"windows":["main"],"permissions":["core:default"]}}

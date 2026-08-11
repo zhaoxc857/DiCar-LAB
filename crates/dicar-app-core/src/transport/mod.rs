@@ -9,11 +9,13 @@ use crate::TransportError;
 pub use tcp::TcpTransport;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Endpoint {
     Simulator { address: SocketAddr },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TransportIdentity {
     pub endpoint: Endpoint,
 }
