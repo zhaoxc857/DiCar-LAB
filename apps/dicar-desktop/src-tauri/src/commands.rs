@@ -1,7 +1,8 @@
 use std::net::SocketAddr;
 
 use dicar_app_core::{
-    available_serial_ports, CoreCommand, Endpoint, OperationResult, SerialPortDescriptor,
+    available_serial_ports, CoreCommand, Endpoint, OperationResult, SerialHardwareProfile,
+    SerialPortDescriptor,
 };
 use serde::Deserialize;
 
@@ -52,6 +53,7 @@ impl EndpointDto {
                 Ok(Endpoint::Serial {
                     port_name,
                     baud_rate,
+                    hardware_profile: SerialHardwareProfile::GenericSerial,
                 })
             }
         }

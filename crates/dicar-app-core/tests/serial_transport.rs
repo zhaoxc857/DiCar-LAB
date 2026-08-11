@@ -8,7 +8,8 @@ use std::{
 
 use dctp_sim::SimulatorServer;
 use dicar_app_core::{
-    CoreCommand, Endpoint, ProtocolSession, SerialTransport, SystemClock, SystemNonce, Transport,
+    CoreCommand, Endpoint, ProtocolSession, SerialHardwareProfile, SerialPortDescriptor,
+    SerialPortKind, SerialTransport, SystemClock, SystemNonce, TelemetryBudget, Transport,
     TransportError,
 };
 
@@ -66,6 +67,7 @@ fn serial_transport_has_typed_identity_bounded_idle_reads_and_idempotent_close()
         Endpoint::Serial {
             port_name: "COM7".to_owned(),
             baud_rate: 921_600,
+            hardware_profile: SerialHardwareProfile::GenericSerial,
         }
     );
     let mut output = [0_u8; 8];
@@ -85,7 +87,7 @@ fn serial_transport_has_typed_identity_bounded_idle_reads_and_idempotent_close()
 
 #[test]
 fn serial_transport_rejects_empty_ports_and_unapproved_baud_rates_before_io() {
-    for (port_name, baud_rate) in [("", 921_600), ("COM7", 230_400)] {
+    for (port_name, baud_rate) in [("", 921_600), ("COM7", 4_800)] {
         let result = SerialTransport::from_io(
             port_name,
             baud_rate,
@@ -97,7 +99,7 @@ fn serial_transport_rejects_empty_ports_and_unapproved_baud_rates_before_io() {
         assert!(result.is_err());
     }
 
-    for baud_rate in [115_200, 460_800, 921_600] {
+    for baud_rate in [9_600, 38_400, 57_600, 115_200, 230_400, 460_800, 921_600] {
         SerialTransport::from_io(
             "COM7",
             baud_rate,
@@ -115,6 +117,7 @@ fn actor_command_accepts_a_runtime_serial_endpoint() {
     let endpoint = Endpoint::Serial {
         port_name: "COM7".to_owned(),
         baud_rate: 921_600,
+        hardware_profile: SerialHardwareProfile::GenericSerial,
     };
     assert!(matches!(
         CoreCommand::ConnectTo {
@@ -122,6 +125,52 @@ fn actor_command_accepts_a_runtime_serial_endpoint() {
         },
         CoreCommand::ConnectTo { endpoint: actual } if actual == endpoint
     ));
+}
+
+#[test]
+fn hardware_profiles_drive_safe_probe_order_and_telemetry_budgets() {
+    assert_eq!(
+        SerialHardwareProfile::NanoUartWl.probe_baud_rates(),
+        &[460_800, 230_400, 115_200]
+    );
+    assert_eq!(
+        SerialHardwareProfile::Hc05BluetoothSpp.probe_baud_rates(),
+        &[115_200, 9_600, 38_400, 57_600, 230_400, 460_800]
+    );
+    assert_eq!(
+        SerialHardwareProfile::Hc05BluetoothSpp.telemetry_budget(9_600),
+        TelemetryBudget {
+            max_channels: 2,
+            max_sample_rate_hz: 10,
+        }
+    );
+    assert_eq!(
+        SerialHardwareProfile::Hc05BluetoothSpp.telemetry_budget(115_200),
+        TelemetryBudget {
+            max_channels: 4,
+            max_sample_rate_hz: 50,
+        }
+    );
+    assert_eq!(
+        SerialHardwareProfile::GenericSerial.telemetry_budget(921_600),
+        TelemetryBudget {
+            max_channels: 8,
+            max_sample_rate_hz: 500,
+        }
+    );
+}
+
+#[test]
+fn serial_port_kind_is_explicit_in_discovery_descriptors() {
+    let descriptor = SerialPortDescriptor {
+        port_name: "COM12".to_owned(),
+        display_name: "Bluetooth 串口".to_owned(),
+        vendor_id: None,
+        product_id: None,
+        port_kind: SerialPortKind::Bluetooth,
+    };
+
+    assert_eq!(descriptor.port_kind, SerialPortKind::Bluetooth);
 }
 
 #[test]

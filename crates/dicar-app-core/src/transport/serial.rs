@@ -4,10 +4,10 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::transport::{Endpoint, Transport, TransportIdentity};
-use crate::TransportError;
+use crate::{SerialHardwareProfile, TransportError};
 
 const READ_TIMEOUT: Duration = Duration::from_millis(10);
-const ALLOWED_BAUD_RATES: [u32; 3] = [115_200, 460_800, 921_600];
+const ALLOWED_BAUD_RATES: [u32; 7] = [9_600, 38_400, 57_600, 115_200, 230_400, 460_800, 921_600];
 
 trait SerialIo: Read + Write + Send {}
 impl<T: Read + Write + Send> SerialIo for T {}
@@ -19,6 +19,16 @@ pub struct SerialPortDescriptor {
     pub display_name: String,
     pub vendor_id: Option<u16>,
     pub product_id: Option<u16>,
+    pub port_kind: SerialPortKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SerialPortKind {
+    Usb,
+    Bluetooth,
+    Pci,
+    Unknown,
 }
 
 pub struct SerialTransport {
@@ -27,17 +37,38 @@ pub struct SerialTransport {
 }
 
 impl SerialTransport {
-    pub fn open(port_name: &str, baud_rate: u32) -> Result<Self, TransportError> {
+    pub fn open(
+        port_name: &str,
+        baud_rate: u32,
+        hardware_profile: SerialHardwareProfile,
+    ) -> Result<Self, TransportError> {
         validate(port_name, baud_rate)?;
         let port = serialport::new(port_name, baud_rate)
             .timeout(READ_TIMEOUT)
             .open()
             .map_err(serial_error)?;
-        Self::from_io(port_name, baud_rate, SerialPortIo(port))
+        Self::from_io_with_profile(port_name, baud_rate, hardware_profile, SerialPortIo(port))
     }
 
     #[doc(hidden)]
     pub fn from_io<T>(port_name: &str, baud_rate: u32, port: T) -> Result<Self, TransportError>
+    where
+        T: Read + Write + Send + 'static,
+    {
+        Self::from_io_with_profile(
+            port_name,
+            baud_rate,
+            SerialHardwareProfile::GenericSerial,
+            port,
+        )
+    }
+
+    fn from_io_with_profile<T>(
+        port_name: &str,
+        baud_rate: u32,
+        hardware_profile: SerialHardwareProfile,
+        port: T,
+    ) -> Result<Self, TransportError>
     where
         T: Read + Write + Send + 'static,
     {
@@ -48,6 +79,7 @@ impl SerialTransport {
                 endpoint: Endpoint::Serial {
                     port_name: port_name.to_owned(),
                     baud_rate,
+                    hardware_profile,
                 },
             },
         })
@@ -114,25 +146,34 @@ pub fn available_serial_ports() -> Result<Vec<SerialPortDescriptor>, TransportEr
         .map_err(serial_error)?
         .into_iter()
         .map(|port| {
-            let (display_name, vendor_id, product_id) = match port.port_type {
+            let (display_name, vendor_id, product_id, port_kind) = match port.port_type {
                 serialport::SerialPortType::UsbPort(info) => (
                     info.product
                         .or(info.manufacturer)
                         .unwrap_or_else(|| "USB 串口".to_owned()),
                     Some(info.vid),
                     Some(info.pid),
+                    SerialPortKind::Usb,
                 ),
-                serialport::SerialPortType::BluetoothPort => {
-                    ("Bluetooth 串口".to_owned(), None, None)
+                serialport::SerialPortType::BluetoothPort => (
+                    "Bluetooth 串口".to_owned(),
+                    None,
+                    None,
+                    SerialPortKind::Bluetooth,
+                ),
+                serialport::SerialPortType::PciPort => {
+                    ("PCI 串口".to_owned(), None, None, SerialPortKind::Pci)
                 }
-                serialport::SerialPortType::PciPort => ("PCI 串口".to_owned(), None, None),
-                serialport::SerialPortType::Unknown => ("串口设备".to_owned(), None, None),
+                serialport::SerialPortType::Unknown => {
+                    ("串口设备".to_owned(), None, None, SerialPortKind::Unknown)
+                }
             };
             SerialPortDescriptor {
                 port_name: port.port_name,
                 display_name,
                 vendor_id,
                 product_id,
+                port_kind,
             }
         })
         .collect::<Vec<_>>();
@@ -165,7 +206,7 @@ fn validate(port_name: &str, baud_rate: u32) -> Result<(), TransportError> {
     if !ALLOWED_BAUD_RATES.contains(&baud_rate) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "波特率必须是 115200、460800 或 921600",
+            "波特率必须是 9600、38400、57600、115200、230400、460800 或 921600",
         )
         .into());
     }

@@ -5,9 +5,9 @@ use std::net::SocketAddr;
 
 use serde::Serialize;
 
-use crate::TransportError;
+use crate::{SerialHardwareProfile, TransportError};
 
-pub use serial::{available_serial_ports, SerialPortDescriptor, SerialTransport};
+pub use serial::{available_serial_ports, SerialPortDescriptor, SerialPortKind, SerialTransport};
 pub use tcp::TcpTransport;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -17,8 +17,14 @@ pub use tcp::TcpTransport;
     rename_all_fields = "camelCase"
 )]
 pub enum Endpoint {
-    Simulator { address: SocketAddr },
-    Serial { port_name: String, baud_rate: u32 },
+    Simulator {
+        address: SocketAddr,
+    },
+    Serial {
+        port_name: String,
+        baud_rate: u32,
+        hardware_profile: SerialHardwareProfile,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -46,7 +52,8 @@ impl ActiveTransport {
             Endpoint::Serial {
                 port_name,
                 baud_rate,
-            } => SerialTransport::open(port_name, *baud_rate).map(Self::Serial),
+                hardware_profile,
+            } => SerialTransport::open(port_name, *baud_rate, *hardware_profile).map(Self::Serial),
         }
     }
 }

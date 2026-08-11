@@ -3,6 +3,7 @@ mod actor;
 mod bridge_model;
 mod clock;
 mod error;
+mod hardware_profile;
 mod model;
 mod parameter_workspace;
 mod session;
@@ -21,6 +22,7 @@ pub use bridge_model::{
 };
 pub use clock::{Clock, FixedNonce, NonceSource, SystemClock, SystemNonce, TestClock};
 pub use error::{CoreError, TransportError};
+pub use hardware_profile::{SerialHardwareProfile, TelemetryBudget};
 pub use model::{ConnectedDevice, ConnectionPhase, DeviceIdentity, DiagnosticsSnapshot};
 pub use parameter_workspace::{
     CommitFailureKind, CommitPlan, ConfirmedChange, DeviceSyncState, OperationToken,
@@ -33,6 +35,6 @@ pub use telemetry_engine::{
     UiTelemetryBatch,
 };
 pub use transport::{
-    available_serial_ports, ActiveTransport, Endpoint, SerialPortDescriptor, SerialTransport,
-    TcpTransport, Transport, TransportIdentity,
+    available_serial_ports, ActiveTransport, Endpoint, SerialPortDescriptor, SerialPortKind,
+    SerialTransport, TcpTransport, Transport, TransportIdentity,
 };
