@@ -1,66 +1,79 @@
-# DiCar LAB
+# DiCar Tune
 
-DiCar LAB 的首版是面向电子设计大赛和智能车竞赛的无线调参工作台。主页采用菜单式入口，实时工作台提供参数编辑、编码器标定、最多 8 路波形、RAM/Flash 状态和本地演示权限控制。
+面向电子设计大赛与智能车竞赛的无线调参、遥测和参数固化工作台。
 
-## 运行 Web 初版
+DiCar Tune 通过 DCTP v1 协议连接车辆，在桌面端集中完成参数读取、RAM 调参、Flash 固化、编码器标定、最多 8 路实时波形和链路诊断。当前版本为 **0.1.2**，优先支持 Windows 桌面 App，并提供可直接体验的内置模拟器。
 
-需要 Node.js 22 和 pnpm 11：
+> 无线串口模块只负责透明传输。连接真实车辆时，车端 MCU 必须运行兼容的 DCTP 固件。
 
-```text
+## 下载 Windows 0.1.2
+
+| 版本 | 适用场景 | 下载 |
+| --- | --- | --- |
+| 安装版 | 日常使用，创建标准 Windows 安装 | [DiCar Tune 0.1.2 Setup](release/DiCar-Tune-0.1.2-Windows-x64-Setup.exe) |
+| 便携版 | 免安装测试，直接运行可执行文件 | [DiCar Tune 0.1.2 Portable](release/DiCar-Tune-0.1.2-Windows-x64-Portable.exe) |
+
+两个版本都包含内置模拟器，不需要额外启动后台服务。发布文件尚未进行商业代码签名，Windows 首次运行时可能显示安全提示。
+
+## 5 分钟体验
+
+1. 下载并启动安装版或便携版。
+2. 在顶部连接栏保持“模拟器体验”。
+3. 点击“连接模拟器”，等待状态变为“已连接”。
+4. 从首页打开“实时调参与波形”。
+5. 修改一个参数并点击“写入 RAM”，观察待固化状态。
+6. 打开波形通道，体验暂停、时间窗口、游标和标记。
+7. 点击“审阅并固化”，确认 RAM 与 Flash 的差异后完成模拟固化。
+
+## 已实现功能
+
+- 菜单式工作区与独立实时调参页面。
+- 由设备 Manifest 驱动的数值、布尔和枚举参数控件。
+- RAM、Flash、Revision 和断线未知状态分别展示。
+- 编码器左右 PPR、正交倍频、只读 CPR、方向、轮径、传动比和测速过滤参数。
+- 最多 8 路混合类型遥测波形，支持暂停、游标、窗口、标记和数据表。
+- nanoUART-wl、HC-05 Bluetooth SPP 和通用 COM 配置。
+- 自动波特率探测、串口类型显示、链路带宽保护和连接诊断。
+- Owner、Tuner、Observer 本地演示权限与单车控制权提示。
+- 内置 DCTP 模拟器、协议重试、CRC、会话和参数版本冲突处理。
+
+## 硬件兼容性
+
+| 硬件/入口 | 当前支持 | 推荐设置 | 遥测安全上限 |
+| --- | --- | --- | --- |
+| nanoUART-wl | Windows 桌面真实串口 | 自动探测，优先 460800 baud | 460800 baud 时最多 8 通道 × 500 Hz |
+| HC-05 | Windows Bluetooth Classic SPP 传出 COM | 先在 Windows 配对，再自动探测 | 通常 4 通道 × 50 Hz；9600 baud 时 2 通道 × 10 Hz |
+| 通用串口 | Windows 桌面 COM | 选择与 MCU 一致的波特率 | 根据波特率自动限制 |
+| Web Serial | 可发现并授权浏览器串口 | Chromium 系浏览器 | 真实 DCTP 会话尚未接入 |
+
+真实硬件的接线、Windows 配对和故障排查见[用户手册](docs/user-guide.md)。
+
+## 文档
+
+- [用户手册：安装、接线、调参、波形与排障](docs/user-guide.md)
+- [开发文档：架构、环境、测试、协议与打包](docs/development.md)
+- [DCTP v1 协议设计](docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md)
+
+## 当前限制
+
+- 无线固件烧录流程尚未接入桌面 UI；当前版本聚焦参数调试和遥测。
+- 纯 Web 客户端尚不能建立真实 DCTP 设备会话。
+- 权限和控制权是本地演示策略，不是云端安全或分布式租约系统。
+- 云账户、团队协作、远程控制、插件市场、自动 PID、AI 建议和多车并发仍属于后续版本。
+- 手机、平板、macOS 和 Linux 客户端尚未发布。
+- nanoUART-wl 与 HC-05 的软件适配已完成，但仍需要在用户的具体模块、固件和赛场环境中进行实体链路验证。
+
+## 开发与验证
+
+需要 Node.js 22、pnpm 11 和 Rust stable：
+
+```powershell
 pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-浏览器打开 `http://127.0.0.1:5173/`。纯 Web 环境默认使用确定性模拟设备，可直接体验“连接 → 调参 → 波形 → 审阅固化”的完整流程。支持 Web Serial 的浏览器可授权并识别 USB 串口，但浏览器端 DCTP 会话仍在下一切片接入；在握手完成前不会显示真实设备已连接，完整硬件调参暂时使用桌面 App。
+浏览器打开 `http://127.0.0.1:5173/`。完整构建、测试、模拟器和 Windows 打包命令见[开发文档](docs/development.md)。
 
-Windows 桌面 App 内置三种真实串口配置：nanoUART-wl、HC-05 蓝牙串口和通用串口。只有完成 DCTP HELLO、Manifest 和参数加载后，界面才会显示设备已就绪；仅打开端口或握手失败都会保持未连接状态。无线模块负责透明传输，车端 MCU 仍需运行 DCTP 固件。
+## 项目状态
 
-### nanoUART-wl
-
-1. 电脑端插入 USB，车端连接 `3V3`、`GND`、`TX`、`RX`，其中 TX/RX 交叉并确保共地。
-2. 在 App 中选择“真实串口 → nanoUART-wl → 新增的 COM 口”。推荐选择“自动探测”；顺序为 460800、230400、115200 baud。
-3. 460800 baud 下允许最多 8 通道 × 500 Hz；较低速率会自动降低遥测安全上限。
-
-### HC-05（电脑蓝牙直连车端）
-
-1. 在 Windows 蓝牙设置中先与车端 HC-05 配对，并在“更多蓝牙设置 → COM 端口”确认系统创建的**传出（Outgoing）COM**。
-2. HC-05 的 TX 接 MCU RX，RX 接 MCU TX，并与 MCU 共地。HC-05 UART 按 3.3 V 逻辑处理；5 V MCU 发往 HC-05 RX 时必须分压或使用电平转换。
-3. 在 App 中选择“真实串口 → HC-05 蓝牙串口 → 传出 COM → 自动探测”。探测顺序为 115200、9600、38400、57600、230400、460800 baud，成功后才保存配置。
-4. 普通 HC-05 链路默认限制为 4 通道 × 50 Hz；9600 baud 限制为 2 通道 × 10 Hz。HC-05 是经典蓝牙 SPP 虚拟串口，纯 Web 客户端不承诺可用。
-
-如果自动探测全部失败，请依次检查：选中的是否为传出 COM、车端 MCU 与模块波特率是否一致、TX/RX 是否交叉、是否共地，以及 MCU 固件是否已启用 DCTP。
-
-关键前端验证：
-
-```text
-pnpm lint
-pnpm typecheck
-pnpm --filter @dicar/desktop test --run
-pnpm build
-pnpm test:e2e
-```
-
-Windows 安装包命令为 `pnpm --filter @dicar/desktop tauri:build`，需要 Visual Studio C++ Build Tools 和正式应用图标。当前发布版本为 0.1.2。
-
-## DCTP v1 protocol foundation
-
-`dctp-protocol` contains the DCTP v1 wire codec and payload models. It performs no serial I/O.
-`dctp-sim` is the deterministic TCP test transport used by the next desktop-client plan.
-
-Parameter reads report the current RAM value and, for persistent parameters, the separately
-committed flash value. `PARAM_COMMIT_ACK` reports the canonical CRC and storage generation.
-The simulator provides deterministic, time-varying telemetry across its default drive channels.
-
-Developer commands:
-
-```text
-cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo run -p dctp-sim -- --help
-cargo run -p dctp-sim -- --listen 127.0.0.1:7100
-cargo run -p dctp-sim --bin generate_vectors -- --check
-```
-
-`generate_vectors` commits six DCTP v1 golden frames, including `param-value.bin` and
-`param-commit-ack.bin`; run it without `--check` only when intentionally regenerating them.
+0.1.2 是可安装、可运行模拟器、可接入 Windows COM 的首个硬件兼容版本。项目仍处于首版迭代阶段，协议和核心状态管理已有自动化测试保障，但真实车辆接入前仍应先在断电、安全架起或低功率条件下验证参数范围与控制方向。
