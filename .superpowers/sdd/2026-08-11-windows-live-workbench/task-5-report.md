@@ -76,3 +76,25 @@ The brief's mention of numeric `step` could be read as requiring alignment. The 
 - `cargo +stable-x86_64-pc-windows-gnu clippy --workspace --all-targets --target-dir C:\DiCar_LAB\task5-fix-clippy-round1 -- -D warnings` — exit 0, zero warnings, from a new isolated target directory.
 - `cargo +stable-x86_64-pc-windows-gnu test --workspace --all-targets --target-dir C:\DiCar_LAB\task5-fix-test-round1` — exit 0; 148 passed, 0 failed, from a second new isolated target directory.
 - `git diff --check` — exit 0; only Git's existing LF-to-CRLF notices were emitted.
+
+## Formal review fix round 2
+
+- `PendingWrite` now records private revert-batch membership. Public single-write resolution rejects a batch-owned operation with `BatchWriteRequiresBatchResolution` before changing any record, pending entry, or batch state. Only the exact active `RevertPlan` can resolve those entries through the private matched resolver.
+- Public session execution is one-shot per active operation. `ParameterWorkspace` records dispatched write tokens and the dispatched commit token before any transport write. Repeating `execute_write` or `execute_commit` for the same opaque handle returns a typed `AlreadyDispatched` error with zero additional frames.
+- Exact write resolution removes its dispatch token; exact commit resolution clears both active and dispatch state on success or error; disconnect clears every dispatch set. A failed commit request must therefore be explicitly settled before a new plan can be dispatched, preventing both duplicate Flash writes and permanently ambiguous reuse.
+- Revert batch entries use the same one-shot send gate, while their results remain bound to the immutable batch plan. The resolver intentionally accepts caller-injected associated results so deterministic model tests and future transport adapters can settle operations; the public `ProtocolSession` boundary is what enforces one physical send per token.
+
+### Round-2 TDD evidence
+
+- Batch bypass RED: missing `BatchWriteRequiresBatchResolution`; GREEN proves a single batch entry cannot resolve independently, leaves two pending writes and both records unchanged, and the exact batch can subsequently settle.
+- Duplicate commit RED: missing `CommitAlreadyDispatched`; GREEN uses a real simulator plus counting transport. The first commit sends one frame, the second sends zero, exact ACK resolution leaves device and local storage generation at 1.
+- Duplicate write RED: missing `WriteAlreadyDispatched`; GREEN proves first send +1 frame, duplicate/stale/wrong handle +0 frames, and the exact replacement operation can still send and settle.
+- Additional regressions prove a device-error commit remains one-shot until explicit error settlement, after which a new plan may dispatch; a real-session revert entry also sends once and can only be applied through exact batch resolution.
+
+### Round-2 fresh verification
+
+- `cargo +stable-x86_64-pc-windows-gnu fmt --all -- --check` — exit 0.
+- Focused affected suites — `parameter_integration` 6/6, `parameter_workspace` 26/26, `session_faults` 20/20; 52 passed, 0 failed.
+- `cargo +stable-x86_64-pc-windows-gnu clippy --offline --target-dir C:\DiCar_LAB\controller-task5-fix2-target --workspace --all-targets -- -D warnings` — exit 0, zero warnings.
+- `cargo +stable-x86_64-pc-windows-gnu test --offline --target-dir C:\DiCar_LAB\controller-task5-fix2-target --workspace --all-targets -- --test-threads=1` — exit 0; 153 passed, 0 failed.
+- `git diff --check` — exit 0; only LF-to-CRLF notices were emitted.

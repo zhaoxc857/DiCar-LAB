@@ -939,6 +939,58 @@ fn revert_all_reports_partial_failure_and_only_ack_confirmed_device_truth() {
 }
 
 #[test]
+fn batch_owned_write_only_resolves_through_the_exact_revert_plan() {
+    let (manifest, states) = manifest_and_states();
+    let mut workspace = ParameterWorkspace::from_manifest_and_states(&manifest, &states).unwrap();
+    let plan = workspace.revert_all(owner()).unwrap();
+    let first = plan.writes()[0].clone();
+    let before_first = workspace.get(1).unwrap().clone();
+    let before_second = workspace.get(2).unwrap().clone();
+
+    assert_eq!(
+        workspace
+            .resolve_write(
+                1,
+                &first,
+                Ok(ParamWriteAck {
+                    value: ParamValue::U32(10),
+                    new_revision: 4,
+                }),
+            )
+            .unwrap_err(),
+        WorkspaceError::BatchWriteRequiresBatchResolution
+    );
+    assert_eq!(workspace.pending_write_count(), 2);
+    assert_eq!(workspace.get(1).unwrap(), &before_first);
+    assert_eq!(workspace.get(2).unwrap(), &before_second);
+
+    let report = workspace
+        .resolve_revert_all(
+            &plan,
+            [
+                (
+                    plan.writes()[0].clone(),
+                    Ok(ParamWriteAck {
+                        value: ParamValue::U32(10),
+                        new_revision: 4,
+                    }),
+                ),
+                (
+                    plan.writes()[1].clone(),
+                    Ok(ParamWriteAck {
+                        value: ParamValue::U32(20),
+                        new_revision: 8,
+                    }),
+                ),
+            ],
+        )
+        .unwrap();
+    assert_eq!(report.confirmed_ids, vec![1, 2]);
+    assert_eq!(workspace.pending_write_count(), 0);
+    assert_eq!(workspace.dirty_count(), 0);
+}
+
+#[test]
 fn revert_all_preflight_failure_registers_nothing() {
     let (mut manifest, states) = manifest_and_states();
     manifest.parameters[1].flags = ParamFlags::PERSISTENT;

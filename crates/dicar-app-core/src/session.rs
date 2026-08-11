@@ -231,10 +231,10 @@ impl<T: Transport> ProtocolSession<T> {
 
     pub fn execute_write(
         &mut self,
-        workspace: &ParameterWorkspace,
+        workspace: &mut ParameterWorkspace,
         operation: &PendingWrite,
     ) -> Result<ParamWriteAck, CoreError> {
-        workspace.validate_pending_execution(operation)?;
+        workspace.dispatch_write(operation)?;
         self.write_parameter(
             operation.param_id,
             operation.expected_revision,
@@ -244,10 +244,10 @@ impl<T: Transport> ProtocolSession<T> {
 
     pub fn execute_commit(
         &mut self,
-        workspace: &ParameterWorkspace,
+        workspace: &mut ParameterWorkspace,
         plan: &CommitPlan,
     ) -> Result<ParamCommitAck, CoreError> {
-        workspace.validate_commit_execution(plan)?;
+        workspace.dispatch_commit(plan)?;
         self.commit_parameters(&plan.to_protocol_commit())
     }
 

@@ -9,9 +9,9 @@ use dctp_protocol::{
     ParamWriteAck, WireDecode, WireEncode, MANIFEST_SCHEMA_VERSION,
 };
 use dicar_app_core::{
-    AccessProfile, AccessRole, Clock, ConnectionPhase, CoreError, Endpoint, FixedNonce, LeaseState,
-    ParameterWorkspace, ProtocolSession, TestClock, Transport, TransportError, TransportIdentity,
-    WriteFailure,
+    AccessProfile, AccessRole, Clock, CommitFailureKind, ConnectionPhase, CoreError, Endpoint,
+    FixedNonce, LeaseState, ParameterWorkspace, ProtocolSession, TestClock, Transport,
+    TransportError, TransportIdentity, WorkspaceError, WriteFailure,
 };
 
 const SESSION_ONE: u32 = 0x1111_0001;
@@ -780,7 +780,7 @@ fn commit_request_uses_three_sends_and_one_sequence() {
         .unwrap();
     control.set_fault(Fault::DropCommitWithRefresh);
 
-    let error = session.execute_commit(&workspace, &plan).unwrap_err();
+    let error = session.execute_commit(&mut workspace, &plan).unwrap_err();
 
     assert!(matches!(
         error,
@@ -806,11 +806,49 @@ fn silent_commit_stops_before_the_retry_at_the_stale_deadline() {
         .unwrap();
     control.set_fault(Fault::Drop(MessageType::ParamCommit));
 
-    let error = session.execute_commit(&workspace, &plan).unwrap_err();
+    let error = session.execute_commit(&mut workspace, &plan).unwrap_err();
 
     assert!(matches!(error, CoreError::Disconnected));
     assert_eq!(session.phase(), ConnectionPhase::Disconnected);
     assert_eq!(control.frames(MessageType::ParamCommit).len(), 1);
+}
+
+#[test]
+fn failed_commit_dispatch_must_be_resolved_before_a_new_plan_can_send() {
+    let (mut session, control, _clock) = ready_session();
+    let mut workspace = dirty_workspace(&session);
+    let owner = AccessProfile::new(AccessRole::Owner, LeaseState::Active);
+    let plan = workspace.commit_dirty(owner).unwrap().unwrap();
+    control.set_fault(Fault::DeviceError(MessageType::ParamCommit));
+
+    assert!(matches!(
+        session.execute_commit(&mut workspace, &plan),
+        Err(CoreError::Device { .. })
+    ));
+    let after_device_error = control.frames(MessageType::ParamCommit).len();
+    assert!(matches!(
+        session.execute_commit(&mut workspace, &plan),
+        Err(CoreError::Workspace(
+            WorkspaceError::CommitAlreadyDispatched
+        ))
+    ));
+    assert_eq!(
+        control.frames(MessageType::ParamCommit).len(),
+        after_device_error
+    );
+
+    assert_eq!(
+        workspace
+            .resolve_commit(&plan, Err(CommitFailureKind::Device))
+            .unwrap_err(),
+        WorkspaceError::CommitFailed(CommitFailureKind::Device)
+    );
+    let retry = workspace.commit_dirty(owner).unwrap().unwrap();
+    session.execute_commit(&mut workspace, &retry).unwrap();
+    assert_eq!(
+        control.frames(MessageType::ParamCommit).len(),
+        after_device_error + 1
+    );
 }
 
 #[test]
@@ -870,7 +908,7 @@ fn malformed_revision_conflict_context_never_overwrites_confirmed_truth() {
         control.queue_revision_conflict_for_next_write(session.session_id().unwrap(), &context);
 
         assert!(matches!(
-            session.execute_write(&workspace, &pending),
+            session.execute_write(&mut workspace, &pending),
             Err(CoreError::Protocol(_))
         ));
         let after_wire_error = workspace.get(1).unwrap();
@@ -966,7 +1004,7 @@ fn reconnect_uses_new_session_reloads_parameters_and_replaces_changed_manifest()
         )
         .unwrap()
         .unwrap();
-    let ack = session.execute_write(&workspace, &pending).unwrap();
+    let ack = session.execute_write(&mut workspace, &pending).unwrap();
     workspace.resolve_write(1, &pending, Ok(ack)).unwrap();
     control.set_manifest_name("gain_b");
 

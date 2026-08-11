@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 use dctp_protocol::{
@@ -58,16 +58,19 @@ pub enum WorkspaceError {
     DeviceStateUnknown(u32),
     WriteOperationMismatch,
     StaleWriteOperation,
+    WriteAlreadyDispatched,
     OldWorkspaceGeneration,
     OperationTokenExhausted,
     WorkspaceGenerationExhausted,
     CommitInFlight,
+    CommitAlreadyDispatched,
     CommitOperationMismatch,
     StaleCommitOperation,
     RevertInFlight,
     RevertCoverageMismatch,
     RevertOperationMismatch,
     StaleRevertOperation,
+    BatchWriteRequiresBatchResolution,
 }
 
 impl fmt::Display for WorkspaceError {
@@ -101,16 +104,21 @@ impl fmt::Display for WorkspaceError {
             Self::DeviceStateUnknown(_) => formatter.write_str("设备状态未知，不能修改参数"),
             Self::WriteOperationMismatch => formatter.write_str("写入操作与在途请求不匹配"),
             Self::StaleWriteOperation => formatter.write_str("写入操作已过期或已完成"),
+            Self::WriteAlreadyDispatched => formatter.write_str("写入操作已发送，等待确认"),
             Self::OldWorkspaceGeneration => formatter.write_str("写入操作属于旧设备工作区"),
             Self::OperationTokenExhausted => formatter.write_str("操作令牌已耗尽"),
             Self::WorkspaceGenerationExhausted => formatter.write_str("工作区世代已耗尽"),
             Self::CommitInFlight => formatter.write_str("已有固化操作等待确认"),
+            Self::CommitAlreadyDispatched => formatter.write_str("固化操作已发送，等待确认"),
             Self::CommitOperationMismatch => formatter.write_str("固化确认与活动计划不匹配"),
             Self::StaleCommitOperation => formatter.write_str("固化计划已过期或已完成"),
             Self::RevertInFlight => formatter.write_str("已有批量回退等待确认"),
             Self::RevertCoverageMismatch => formatter.write_str("批量回退结果覆盖不完整或重复"),
             Self::RevertOperationMismatch => formatter.write_str("批量回退结果与活动计划不匹配"),
             Self::StaleRevertOperation => formatter.write_str("批量回退计划已过期或已完成"),
+            Self::BatchWriteRequiresBatchResolution => {
+                formatter.write_str("批量回退写入只能通过对应批次结算")
+            }
         }
     }
 }
@@ -121,16 +129,18 @@ impl std::error::Error for WorkspaceError {}
 pub struct ParameterWorkspace {
     records: BTreeMap<u32, ParameterRecord>,
     in_flight: BTreeMap<u32, PendingWrite>,
+    dispatched_writes: BTreeSet<OperationToken>,
     queued_latest: BTreeMap<u32, ParamValue>,
     storage_generation: u32,
     history: VecDeque<ConfirmedChange>,
     workspace_generation: WorkspaceGeneration,
     next_operation_token: u64,
     active_commit: Option<CommitPlan>,
+    dispatched_commit: Option<OperationToken>,
     active_revert: Option<RevertPlan>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct OperationToken(u64);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -140,6 +150,7 @@ pub struct WorkspaceGeneration(u64);
 pub struct PendingWrite {
     operation_token: OperationToken,
     workspace_generation: WorkspaceGeneration,
+    batch_token: Option<OperationToken>,
     pub param_id: u32,
     pub expected_revision: u32,
     pub value: ParamValue,
@@ -157,6 +168,7 @@ impl PendingWrite {
     fn wire_matches(&self, other: &Self) -> bool {
         self.operation_token == other.operation_token
             && self.workspace_generation == other.workspace_generation
+            && self.batch_token == other.batch_token
             && self.param_id == other.param_id
             && self.expected_revision == other.expected_revision
             && self.value.wire_eq(&other.value)
@@ -331,12 +343,14 @@ impl ParameterWorkspace {
         Ok(Self {
             records,
             in_flight: BTreeMap::new(),
+            dispatched_writes: BTreeSet::new(),
             queued_latest: BTreeMap::new(),
             storage_generation: 0,
             history: VecDeque::with_capacity(HISTORY_CAPACITY),
             workspace_generation: WorkspaceGeneration(1),
             next_operation_token: 1,
             active_commit: None,
+            dispatched_commit: None,
             active_revert: None,
         })
     }
@@ -371,6 +385,7 @@ impl ParameterWorkspace {
         let pending = PendingWrite {
             operation_token,
             workspace_generation: self.workspace_generation,
+            batch_token: None,
             param_id,
             expected_revision: record.revision,
             value,
@@ -450,6 +465,18 @@ impl ParameterWorkspace {
         operation: &PendingWrite,
         result: Result<ParamWriteAck, WriteFailure>,
     ) -> Result<Option<PendingWrite>, WorkspaceError> {
+        if operation.batch_token.is_some() {
+            return Err(WorkspaceError::BatchWriteRequiresBatchResolution);
+        }
+        self.resolve_matched_write(param_id, operation, result)
+    }
+
+    fn resolve_matched_write(
+        &mut self,
+        param_id: u32,
+        operation: &PendingWrite,
+        result: Result<ParamWriteAck, WriteFailure>,
+    ) -> Result<Option<PendingWrite>, WorkspaceError> {
         if operation.workspace_generation != self.workspace_generation {
             return Err(WorkspaceError::OldWorkspaceGeneration);
         }
@@ -467,6 +494,7 @@ impl ParameterWorkspace {
             .in_flight
             .remove(&param_id)
             .ok_or(WorkspaceError::StaleWriteOperation)?;
+        self.dispatched_writes.remove(&operation.operation_token);
         let record = self
             .records
             .get_mut(&param_id)
@@ -519,6 +547,7 @@ impl ParameterWorkspace {
                 let follow_up = PendingWrite {
                     operation_token,
                     workspace_generation: self.workspace_generation,
+                    batch_token: None,
                     param_id,
                     expected_revision: record.revision,
                     value: queued,
@@ -614,6 +643,7 @@ impl ParameterWorkspace {
             return Err(WorkspaceError::CommitOperationMismatch);
         }
         self.active_commit = None;
+        self.dispatched_commit = None;
         let ack = result.map_err(WorkspaceError::CommitFailed)?;
         if ack.canonical_crc32 != plan.canonical_crc32 {
             return Err(WorkspaceError::CommitCrcMismatch);
@@ -732,6 +762,7 @@ impl ParameterWorkspace {
             writes.push(PendingWrite {
                 operation_token,
                 workspace_generation: self.workspace_generation,
+                batch_token: Some(batch_token),
                 param_id,
                 expected_revision: record.revision,
                 value,
@@ -824,8 +855,11 @@ impl ParameterWorkspace {
                 .ok_or(WorkspaceError::RevertCoverageMismatch)?;
             let (operation, result) = results.swap_remove(result_index);
             let confirmed = result.is_ok();
+            if operation.batch_token != Some(plan.operation_token) {
+                return Err(WorkspaceError::RevertOperationMismatch);
+            }
             if self
-                .resolve_write(operation.param_id, &operation, result)?
+                .resolve_matched_write(operation.param_id, &operation, result)?
                 .is_some()
             {
                 return Err(WorkspaceError::WritesPending);
@@ -862,9 +896,11 @@ impl ParameterWorkspace {
 
     pub fn mark_disconnected(&mut self) {
         self.in_flight.clear();
+        self.dispatched_writes.clear();
         self.queued_latest.clear();
         self.history.clear();
         self.active_commit = None;
+        self.dispatched_commit = None;
         self.active_revert = None;
         for record in self.records.values_mut() {
             record.sync_state = DeviceSyncState::Unknown;
@@ -900,8 +936,8 @@ impl ParameterWorkspace {
         self.records.values()
     }
 
-    pub(crate) fn validate_pending_execution(
-        &self,
+    pub(crate) fn dispatch_write(
+        &mut self,
         operation: &PendingWrite,
     ) -> Result<(), WorkspaceError> {
         if operation.workspace_generation != self.workspace_generation {
@@ -914,13 +950,13 @@ impl ParameterWorkspace {
         if !active.wire_matches(operation) {
             return Err(WorkspaceError::WriteOperationMismatch);
         }
+        if !self.dispatched_writes.insert(operation.operation_token) {
+            return Err(WorkspaceError::WriteAlreadyDispatched);
+        }
         Ok(())
     }
 
-    pub(crate) fn validate_commit_execution(
-        &self,
-        plan: &CommitPlan,
-    ) -> Result<(), WorkspaceError> {
+    pub(crate) fn dispatch_commit(&mut self, plan: &CommitPlan) -> Result<(), WorkspaceError> {
         if plan.workspace_generation != self.workspace_generation {
             return Err(WorkspaceError::OldWorkspaceGeneration);
         }
@@ -931,6 +967,10 @@ impl ParameterWorkspace {
         if !active.wire_matches(plan) {
             return Err(WorkspaceError::CommitOperationMismatch);
         }
+        if self.dispatched_commit == Some(plan.operation_token) {
+            return Err(WorkspaceError::CommitAlreadyDispatched);
+        }
+        self.dispatched_commit = Some(plan.operation_token);
         Ok(())
     }
 }
