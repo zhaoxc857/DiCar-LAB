@@ -20,6 +20,10 @@ pub struct DeviceIdentity {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DiagnosticsSnapshot {
+    pub inbound_bytes: u64,
+    pub outbound_bytes: u64,
+    pub last_rtt_ms: u64,
+    pub last_valid_frame_at_ms: u64,
     pub valid_frames: u64,
     pub malformed_frames: u64,
     pub crc_errors: u64,

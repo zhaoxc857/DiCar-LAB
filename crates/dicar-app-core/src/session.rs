@@ -438,6 +438,7 @@ impl<T: Transport> ProtocolSession<T> {
                 self.ensure_writable_session()?;
             }
             self.write_transport(&encoded)?;
+            let sent_at = self.clock.now_ms();
             let deadline = self.clock.now_ms().saturating_add(timeout_ms);
             while self.clock.now_ms() < deadline {
                 let mut matched = None;
@@ -476,6 +477,7 @@ impl<T: Transport> ProtocolSession<T> {
                     self.queue_unsolicited(received);
                 }
                 if let Some(result) = matched {
+                    self.diagnostics.last_rtt_ms = self.clock.now_ms().saturating_sub(sent_at);
                     return result;
                 }
                 self.clock.idle_until(deadline);
@@ -496,6 +498,8 @@ impl<T: Transport> ProtocolSession<T> {
                 return Err(error.into());
             }
         };
+        self.diagnostics.inbound_bytes =
+            self.diagnostics.inbound_bytes.saturating_add(count as u64);
         let mut frames = Vec::new();
         for decoded in self.decoder.push(&bytes[..count]) {
             match decoded {
@@ -513,6 +517,7 @@ impl<T: Transport> ProtocolSession<T> {
                         }
                     }
                     self.last_valid_frame_at = self.clock.now_ms();
+                    self.diagnostics.last_valid_frame_at_ms = self.last_valid_frame_at;
                     self.diagnostics.valid_frames += 1;
                     frames.push(frame);
                 }
@@ -577,7 +582,13 @@ impl<T: Transport> ProtocolSession<T> {
 
     fn write_transport(&mut self, bytes: &[u8]) -> Result<(), CoreError> {
         match self.transport.write_all(bytes) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                self.diagnostics.outbound_bytes = self
+                    .diagnostics
+                    .outbound_bytes
+                    .saturating_add(bytes.len() as u64);
+                Ok(())
+            }
             Err(error) => {
                 self.disconnect();
                 Err(error.into())

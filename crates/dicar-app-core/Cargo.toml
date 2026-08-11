@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+crossbeam-channel = "0.5"
 dctp-protocol = { path = "../dctp-protocol" }
 serde = { version = "1", features = ["derive"] }
 
