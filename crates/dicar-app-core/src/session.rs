@@ -260,15 +260,30 @@ impl<T: Transport> ProtocolSession<T> {
             self.write_transport(&encoded)?;
             let deadline = self.clock.now_ms().saturating_add(MANIFEST_TIMEOUT_MS);
             while self.clock.now_ms() < deadline {
+                let mut completed = None;
                 for received in self.read_once()? {
+                    if completed.is_some() {
+                        self.queue_unsolicited(received);
+                        continue;
+                    }
                     if received.header.session_id != session_id
                         || received.header.sequence != sequence
+                        || !is_response(&received)
                     {
                         self.queue_unsolicited(received);
                         continue;
                     }
                     if received.header.message_type == MessageType::Error {
-                        return Err(self.device_error(received)?);
+                        if let Some(error) = self.matching_device_error(
+                            &received,
+                            MessageType::ManifestRequest,
+                            sequence,
+                        )? {
+                            completed = Some(Err(error));
+                        } else {
+                            self.queue_unsolicited(received);
+                        }
+                        continue;
                     }
                     match received.header.message_type {
                         MessageType::ManifestChunk => {
@@ -308,10 +323,13 @@ impl<T: Transport> ProtocolSession<T> {
                                     actual: decoded_crc,
                                 });
                             }
-                            return Ok(manifest);
+                            completed = Some(Ok(manifest));
                         }
                         _ => self.queue_unsolicited(received),
                     }
+                }
+                if let Some(result) = completed {
+                    return result;
                 }
                 self.clock.idle_until(deadline);
             }
@@ -355,24 +373,43 @@ impl<T: Transport> ProtocolSession<T> {
             self.write_transport(&encoded)?;
             let deadline = self.clock.now_ms().saturating_add(timeout_ms);
             while self.clock.now_ms() < deadline {
+                let mut matched = None;
                 for received in self.read_once()? {
+                    if matched.is_some() {
+                        self.queue_unsolicited(received);
+                        continue;
+                    }
                     let matching_session = if hello {
                         received.header.message_type == MessageType::Error
                             || received.header.session_id != 0
                     } else {
                         received.header.session_id == session_id
                     };
-                    if received.header.sequence != sequence || !matching_session {
+                    if received.header.sequence != sequence
+                        || !matching_session
+                        || !is_response(&received)
+                    {
                         self.queue_unsolicited(received);
                         continue;
                     }
                     if received.header.message_type == MessageType::Error {
-                        return Err(self.device_error(received)?);
+                        if let Some(error) =
+                            self.matching_device_error(&received, message_type, sequence)?
+                        {
+                            matched = Some(Err(error));
+                        } else {
+                            self.queue_unsolicited(received);
+                        }
+                        continue;
                     }
                     if received.header.message_type == expected_response {
-                        return Ok(received);
+                        matched = Some(Ok(received));
+                        continue;
                     }
                     self.queue_unsolicited(received);
+                }
+                if let Some(result) = matched {
+                    return result;
                 }
                 self.clock.idle_until(deadline);
             }
@@ -439,17 +476,25 @@ impl<T: Transport> ProtocolSession<T> {
         Ok(())
     }
 
-    fn device_error(&mut self, frame: Frame) -> Result<CoreError, CoreError> {
+    fn matching_device_error(
+        &mut self,
+        frame: &Frame,
+        request_type: MessageType,
+        sequence: u16,
+    ) -> Result<Option<CoreError>, CoreError> {
         let payload = ErrorPayload::decode(&frame.payload)?;
+        if payload.original_message_type != request_type || payload.original_sequence != sequence {
+            return Ok(None);
+        }
         if payload.error_code == ErrorCode::InvalidSession {
             self.disconnect();
         }
-        Ok(CoreError::Device {
+        Ok(Some(CoreError::Device {
             original_message_type: payload.original_message_type,
             original_sequence: payload.original_sequence,
             code: payload.error_code,
             context: payload.context,
-        })
+        }))
     }
 
     fn ensure_writable_session(&mut self) -> Result<(), CoreError> {
@@ -492,6 +537,10 @@ impl<T: Transport> ProtocolSession<T> {
         }
         self.unsolicited.push_back(frame);
     }
+}
+
+fn is_response(frame: &Frame) -> bool {
+    frame.header.flags.bits() & FrameFlags::RESPONSE.bits() != 0
 }
 
 fn request_policy(message_type: MessageType) -> (u64, u8) {

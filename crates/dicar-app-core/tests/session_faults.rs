@@ -27,6 +27,10 @@ enum Fault {
     ManifestTailThenFull,
     DropCommitWithRefresh,
     TransportDisconnect(MessageType),
+    ResponseThenUnsolicited(MessageType),
+    ManifestThenUnsolicited,
+    UnflaggedThenResponse(MessageType),
+    UnrelatedErrorThenResponse(MessageType),
 }
 
 struct FakeState {
@@ -190,6 +194,54 @@ impl Transport for FakeTransport {
 
         let response = response_for(&mut state, &request);
         match state.fault {
+            Fault::ResponseThenUnsolicited(message_type)
+                if message_type == request.header.message_type =>
+            {
+                for frame in response {
+                    Self::queue_response(&mut state, frame, false);
+                }
+                queue_unsolicited_pair(&mut state, request.header.session_id);
+                state.fault = Fault::None;
+            }
+            Fault::ManifestThenUnsolicited
+                if request.header.message_type == MessageType::ManifestRequest =>
+            {
+                for frame in response {
+                    Self::queue_response(&mut state, frame, false);
+                }
+                queue_unsolicited_pair(&mut state, request.header.session_id);
+                state.fault = Fault::None;
+            }
+            Fault::UnflaggedThenResponse(message_type)
+                if message_type == request.header.message_type && response.len() == 1 =>
+            {
+                let mut unflagged = response[0].clone();
+                unflagged.header.flags = FrameFlags::NONE;
+                Self::queue_response(&mut state, unflagged, false);
+                Self::queue_response(&mut state, response[0].clone(), false);
+                state.fault = Fault::None;
+            }
+            Fault::UnrelatedErrorThenResponse(message_type)
+                if message_type == request.header.message_type && response.len() == 1 =>
+            {
+                let payload = ErrorPayload {
+                    original_message_type: MessageType::ParamWrite,
+                    original_sequence: request.header.sequence.wrapping_add(1),
+                    error_code: ErrorCode::Busy,
+                    context: "unrelated".to_owned(),
+                };
+                let error = Frame::new(
+                    MessageType::Error,
+                    FrameFlags::from_bits(FrameFlags::ERROR.bits() | FrameFlags::RESPONSE.bits()),
+                    request.header.sequence,
+                    request.header.session_id,
+                    payload.encode().unwrap(),
+                )
+                .unwrap();
+                Self::queue_response(&mut state, error, false);
+                Self::queue_response(&mut state, response[0].clone(), false);
+                state.fault = Fault::None;
+            }
             Fault::ManifestPartial
                 if request.header.message_type == MessageType::ManifestRequest =>
             {
@@ -387,6 +439,26 @@ fn response_frame(
     .unwrap()
 }
 
+fn queue_unsolicited_pair(state: &mut FakeState, session_id: u32) {
+    for (message_type, sequence) in [
+        (MessageType::TelemetryData, 50_001),
+        (MessageType::LogMessage, 50_002),
+    ] {
+        FakeTransport::queue_response(
+            state,
+            Frame::new(
+                message_type,
+                FrameFlags::NONE,
+                sequence,
+                session_id,
+                Vec::new(),
+            )
+            .unwrap(),
+            false,
+        );
+    }
+}
+
 fn manifest(name: &str) -> DeviceManifest {
     DeviceManifest {
         schema_version: MANIFEST_SCHEMA_VERSION,
@@ -430,6 +502,79 @@ fn crc_noise_is_counted_and_the_following_valid_frame_completes_the_request() {
     let after = session.diagnostics();
     assert_eq!(after.crc_errors, before.crc_errors + 1);
     assert_eq!(after.valid_frames, before.valid_frames + 1);
+}
+
+#[test]
+fn request_preserves_frames_after_its_response_from_the_same_read() {
+    let (mut session, control, _clock) = ready_session();
+    control.set_fault(Fault::ResponseThenUnsolicited(MessageType::Heartbeat));
+
+    session
+        .request(MessageType::Heartbeat, vec![0, 0, 0, 0])
+        .unwrap();
+
+    assert_eq!(
+        session.pop_unsolicited().unwrap().header.message_type,
+        MessageType::TelemetryData
+    );
+    assert_eq!(
+        session.pop_unsolicited().unwrap().header.message_type,
+        MessageType::LogMessage
+    );
+}
+
+#[test]
+fn manifest_preserves_frames_after_done_from_the_same_read() {
+    let clock = TestClock::new();
+    let (transport, control) = FakeTransport::new(clock.clone());
+    control.set_fault(Fault::ManifestThenUnsolicited);
+    let mut session = ProtocolSession::new(transport, FixedNonce(14), clock);
+
+    session.connect_and_load().unwrap();
+
+    assert_eq!(
+        session.pop_unsolicited().unwrap().header.message_type,
+        MessageType::TelemetryData
+    );
+    assert_eq!(
+        session.pop_unsolicited().unwrap().header.message_type,
+        MessageType::LogMessage
+    );
+}
+
+#[test]
+fn request_ignores_an_unflagged_lookalike_before_the_real_response() {
+    let (mut session, control, _clock) = ready_session();
+    control.set_fault(Fault::UnflaggedThenResponse(MessageType::Heartbeat));
+
+    let response = session
+        .request(MessageType::Heartbeat, vec![0, 0, 0, 0])
+        .unwrap();
+
+    assert_ne!(
+        response.header.flags.bits() & FrameFlags::RESPONSE.bits(),
+        0
+    );
+    assert_eq!(
+        session.pop_unsolicited().unwrap().header.message_type,
+        MessageType::HeartbeatAck
+    );
+}
+
+#[test]
+fn unrelated_error_is_unsolicited_and_does_not_fail_the_request() {
+    let (mut session, control, _clock) = ready_session();
+    control.set_fault(Fault::UnrelatedErrorThenResponse(MessageType::Heartbeat));
+
+    let response = session
+        .request(MessageType::Heartbeat, vec![0, 0, 0, 0])
+        .unwrap();
+
+    assert_eq!(response.header.message_type, MessageType::HeartbeatAck);
+    assert_eq!(
+        session.pop_unsolicited().unwrap().header.message_type,
+        MessageType::Error
+    );
 }
 
 #[test]
