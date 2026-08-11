@@ -6,8 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+dctp-protocol = { path = "../dctp-protocol" }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
-dctp-protocol = { path = "../dctp-protocol" }
 dctp-sim = { path = "../dctp-sim" }
