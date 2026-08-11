@@ -2,6 +2,7 @@ import { createContext, useContext, useState, type PropsWithChildren } from "rea
 import type { DesktopBridge } from "../bridge/desktopBridge";
 import { MockBridge } from "../bridge/mockBridge";
 import { TauriBridge } from "../bridge/tauriBridge";
+import { useBridgeSubscription } from "../hooks/useBridgeSubscription";
 
 const DesktopBridgeContext = createContext<DesktopBridge | null>(null);
 
@@ -13,9 +14,15 @@ export function AppProviders({ bridge, children }: AppProvidersProps) {
   const [resolvedBridge] = useState<DesktopBridge>(() => bridge ?? createDefaultBridge());
   return (
     <DesktopBridgeContext.Provider value={resolvedBridge}>
+      <BridgeSubscription bridge={resolvedBridge} />
       {children}
     </DesktopBridgeContext.Provider>
   );
+}
+
+function BridgeSubscription({ bridge }: { bridge: DesktopBridge }) {
+  useBridgeSubscription(bridge);
+  return null;
 }
 
 export function useDesktopBridge(): DesktopBridge {
