@@ -36,7 +36,7 @@ function disconnectedSnapshot(): AppSnapshot {
     sessionId: null,
     deviceIdHex: null,
     firmwareVersion: null,
-    parameters: [pidParameter()],
+    parameters: parameterFixtures(),
     telemetryDescriptors,
     dirtyCount: 0,
     storageGeneration: 0,
@@ -66,23 +66,56 @@ function disconnectedSnapshot(): AppSnapshot {
   };
 }
 
-function pidParameter(): ParameterSnapshot {
-  return {
-    paramId: 1,
-    machineName: "pid.kp",
-    displayName: "速度环 Kp",
-    group: "速度环 PID",
-    unit: "",
-    ramValue: { kind: "f32", value: 1 },
-    persistedValue: { kind: "f32", value: 1 },
-    revision: 1,
-    dirty: false,
-    syncKnown: true,
-    writeState: "idle",
-    writable: true,
-    dangerous: false,
-    lastError: null,
-  };
+function parameterFixtures(): ParameterSnapshot[] {
+  return [
+    numericParameter(1, "pid.speed.kp", "速度环 Kp", "速度环 PID", "", "f32", 1.2, 0, 20, 0.01, "比例增益，影响速度误差的即时响应"),
+    numericParameter(2, "pid.speed.ki", "速度环 Ki", "速度环 PID", "", "f32", 0.08, 0, 5, 0.001, "积分增益，用于消除稳态误差"),
+    numericParameter(3, "pid.speed.kd", "速度环 Kd", "速度环 PID", "", "f32", 0.002, 0, 1, 0.0001, "微分增益，用于抑制快速变化"),
+    numericParameter(4, "control.target_speed_mps", "目标速度", "速度环 PID", "m/s", "f32", 2.5, 0, 8, 0.05, "测试阶段目标车速", true),
+    numericParameter(100, "encoder.left.ppr", "左编码器 PPR", "编码器与车轮", "pulse/rev", "u32", 512, 1, 65535, 1, "左编码器每机械转输出的脉冲数"),
+    numericParameter(101, "encoder.right.ppr", "右编码器 PPR", "编码器与车轮", "pulse/rev", "u32", 512, 1, 65535, 1, "右编码器每机械转输出的脉冲数"),
+    enumParameter(102, "encoder.quadrature_multiplier", "正交倍频", "编码器与车轮", 4, [{ value: 1, label: "×1" }, { value: 2, label: "×2" }, { value: 4, label: "×4" }]),
+    boolParameter(103, "encoder.left.inverted", "左侧方向反向", "编码器与车轮", false),
+    boolParameter(104, "encoder.right.inverted", "右侧方向反向", "编码器与车轮", true),
+    numericParameter(105, "vehicle.wheel_diameter_mm", "车轮直径", "编码器与车轮", "mm", "f32", 64, 10, 200, 0.1),
+    numericParameter(106, "vehicle.gear_ratio", "传动比", "编码器与车轮", "ratio", "f32", 1, 0.01, 20, 0.001),
+    numericParameter(107, "encoder.sample_period_ms", "测速采样周期", "编码器与车轮", "ms", "u32", 2, 1, 100, 1),
+    numericParameter(108, "encoder.speed_lpf_hz", "速度低通截止频率", "编码器与车轮", "Hz", "f32", 35, 0.1, 250, 0.1),
+    numericParameter(109, "encoder.jump_threshold", "计数跳变阈值", "编码器与车轮", "count", "u32", 240, 1, 10000, 1),
+    numericParameter(110, "encoder.credible_rpm", "可信最高转速", "编码器与车轮", "rpm", "u32", 6000, 1, 100000, 10),
+    boolParameter(111, "encoder.missing_pulse_detection", "缺脉冲检测", "编码器与车轮", true),
+    numericParameter(120, "motor.pwm_limit", "电机 PWM 上限", "电机与保护", "%", "u32", 92, 0, 100, 1, "限制驱动输出，修改前确认电源和机械安全", true),
+    numericParameter(121, "motor.current_limit_a", "电机电流上限", "电机与保护", "A", "f32", 12, 0, 40, 0.1, "超过此阈值时触发保护", true),
+    numericParameter(122, "steering.center_pwm_us", "舵机中位 PWM", "转向控制", "µs", "u32", 1500, 800, 2200, 1),
+  ];
+}
+
+function numericParameter(
+  paramId: number,
+  machineName: string,
+  displayName: string,
+  group: string,
+  unit: string,
+  kind: "f32" | "i32" | "u32",
+  value: number,
+  min: number,
+  max: number,
+  step: number,
+  description?: string,
+  dangerous = false,
+): ParameterSnapshot {
+  const parameterValue = { kind, value } as ParameterValue;
+  return { paramId, machineName, displayName, group, unit, ramValue: parameterValue, persistedValue: parameterValue, revision: 1, dirty: false, syncKnown: false, writeState: "idle", writable: true, dangerous, lastError: null, description, numeric: { min, max, step } };
+}
+
+function boolParameter(paramId: number, machineName: string, displayName: string, group: string, value: boolean): ParameterSnapshot {
+  const parameterValue = { kind: "bool", value } as const;
+  return { paramId, machineName, displayName, group, unit: "", ramValue: parameterValue, persistedValue: parameterValue, revision: 1, dirty: false, syncKnown: false, writeState: "idle", writable: true, dangerous: false, lastError: null };
+}
+
+function enumParameter(paramId: number, machineName: string, displayName: string, group: string, value: number, enumOptions: Array<{ value: number; label: string }>): ParameterSnapshot {
+  const parameterValue = { kind: "enum", value } as const;
+  return { paramId, machineName, displayName, group, unit: "", ramValue: parameterValue, persistedValue: parameterValue, revision: 1, dirty: false, syncKnown: false, writeState: "idle", writable: true, dangerous: false, lastError: null, enumOptions };
 }
 
 export class MockBridge implements DesktopBridge {

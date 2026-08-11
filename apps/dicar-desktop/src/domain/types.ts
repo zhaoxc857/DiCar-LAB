@@ -58,6 +58,9 @@ export interface ParameterSnapshot {
   writable: boolean;
   dangerous: boolean;
   lastError: string | null;
+  description?: string;
+  numeric?: { min: number; max: number; step: number };
+  enumOptions?: Array<{ value: number; label: string }>;
 }
 
 export interface TelemetryDescriptor {

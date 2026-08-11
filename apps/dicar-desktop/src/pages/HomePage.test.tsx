@@ -23,7 +23,7 @@ it("renders the B-style menu and connects the real simulator destination", async
   fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
   expect(await screen.findByText("已就绪")).toBeInTheDocument();
   expect(screen.getByText("16 个遥测通道")).toBeInTheDocument();
-  expect(screen.getByText("1 个参数")).toBeInTheDocument();
+  expect(screen.getByText("19 个参数")).toBeInTheDocument();
 });
 
 it("keeps the skip link and exposes an honest deferred destination", async () => {
