@@ -37,7 +37,7 @@ describe("serial hardware connection probing", () => {
   });
 
   it("returns a disconnected failure after exhausting every profile rate", async () => {
-    const connect = vi.fn(async (_endpoint: Endpoint) => failed(7, "未收到 DCTP 握手"));
+    const connect = vi.fn(async () => failed(7, "未收到 DCTP 握手"));
 
     const result = await connectSerialWithProbe(
       { connect },
@@ -52,7 +52,7 @@ describe("serial hardware connection probing", () => {
   });
 
   it("uses one explicit baud rate without probing other values", async () => {
-    const connect = vi.fn(async (_endpoint: Endpoint) => succeeded(9, "设备连接并加载完成"));
+    const connect = vi.fn(async () => succeeded(9, "设备连接并加载完成"));
 
     const result = await connectSerialWithProbe(
       { connect },

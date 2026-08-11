@@ -29,3 +29,14 @@ test("Observer 只能查看波形，不能修改或固化", async ({ page }) => 
   await expect(page.getByRole("button", { name: "审阅并固化" })).toBeDisabled();
   await expect(page.getByText("8/8 通道", { exact: true })).toBeVisible();
 });
+
+test("真实串口入口展示 HC-05 配对、传出 COM 和电平安全说明", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("连接方式").selectOption("serial");
+  await page.getByLabel("硬件类型").selectOption("hc05BluetoothSpp");
+
+  await expect(page.getByText("先在 Windows 蓝牙设置中完成配对")).toBeVisible();
+  await expect(page.getByText("请选择系统创建的传出（Outgoing）COM 口")).toBeVisible();
+  await expect(page.getByText(/5V MCU 发往 HC-05 RX 时必须分压/)).toBeVisible();
+  await expect(page.getByRole("option", { name: "自动探测" })).toBeAttached();
+});
