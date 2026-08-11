@@ -19,11 +19,31 @@ it("renders the B-style menu and connects the real simulator destination", async
   expect(screen.getByRole("link", { name: /连接与链路诊断/ })).toBeInTheDocument();
   expect(screen.getByText("本地演示权限")).toBeInTheDocument();
   expect(screen.getByText("未连接")).toBeInTheDocument();
+  expect(screen.getByLabelText("连接方式")).toHaveValue("simulator");
 
   fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
   expect(await screen.findByText("已就绪")).toBeInTheDocument();
   expect(screen.getByText("16 个遥测通道")).toBeInTheDocument();
   expect(screen.getByText("19 个参数")).toBeInTheDocument();
+});
+
+it("separates the real serial path and never reports a web preview as hardware", async () => {
+  const bridge = new MockBridge();
+  render(
+    <AppProviders bridge={bridge}>
+      <App />
+    </AppProviders>,
+  );
+  await act(async () => undefined);
+
+  fireEvent.change(screen.getByLabelText("连接方式"), { target: { value: "serial" } });
+  expect(await screen.findByText("当前 Web 预览不能访问真实串口，请使用桌面 App")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "连接真实设备" })).toBeDisabled();
+  expect(screen.getByText("未连接")).toBeInTheDocument();
+
+  const result = await bridge.connect({ kind: "serial", portName: "COM7", baudRate: 921600 });
+  expect(result).toMatchObject({ status: "failed" });
+  expect((await bridge.getSnapshot()).phase).toBe("disconnected");
 });
 
 it("keeps the skip link and exposes an honest deferred destination", async () => {

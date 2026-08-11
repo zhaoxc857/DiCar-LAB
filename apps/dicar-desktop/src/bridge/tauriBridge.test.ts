@@ -68,6 +68,10 @@ it("maps typed bridge calls to the exact Tauri commands and arguments", async ()
   const value = { kind: "f32" as const, value: 2.5 };
 
   await bridge.connect(endpoint);
+  tauri.invoke.mockResolvedValueOnce([
+    { portName: "COM7", displayName: "无线 DAP", vendorId: 0x1a86, productId: 0x7523 },
+  ]);
+  const ports = await bridge.listSerialPorts();
   await bridge.writeParameter(1, value);
   await bridge.setTelemetrySubscription({ channelIds: [200, 201], sampleRateHz: 500 });
   await bridge.resolveWindowClose(7, "disconnectKeepUnknown");
@@ -75,9 +79,11 @@ it("maps typed bridge calls to the exact Tauri commands and arguments", async ()
 
   expect(tauri.invoke.mock.calls).toEqual([
     ["connect", { endpoint }],
+    ["list_serial_ports"],
     ["write_parameter", { paramId: 1, value }],
     ["set_telemetry_subscription", { request: { channelIds: [200, 201], sampleRateHz: 500 } }],
     ["resolve_window_close", { requestId: 7, decision: "disconnectKeepUnknown" }],
     ["get_snapshot"],
   ]);
+  expect(ports[0]).toMatchObject({ portName: "COM7", displayName: "无线 DAP" });
 });

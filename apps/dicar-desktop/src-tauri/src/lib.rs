@@ -9,7 +9,7 @@ pub use app_state::{AppState, BridgeErrorDto};
 pub use channel_forwarder::{
     FrontendEvent, FrontendEventPayload, FrontendEventSequencer, FrontendSink, WindowCloseRequest,
 };
-pub use commands::{connect_core, EndpointDto};
+pub use commands::{connect_core, list_serial_ports_core, EndpointDto};
 #[cfg(any(target_env = "msvc", feature = "native-check"))]
 pub use commands::{AccessProfileId, ParameterValueDto};
 pub use window_guard::{CloseDecision, CloseRequestOutcome, CloseResolution};
@@ -17,10 +17,11 @@ pub use window_guard::{CloseDecision, CloseRequestOutcome, CloseResolution};
 use window_guard::WindowCloseCoordinator;
 
 #[cfg(any(target_env = "msvc", feature = "native-check"))]
-pub fn command_handler(
-) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+pub fn command_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static
+{
     tauri::generate_handler![
         commands::connect,
+        commands::list_serial_ports,
         commands::disconnect,
         commands::write_parameter,
         commands::commit_parameters,

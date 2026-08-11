@@ -6,8 +6,8 @@ use dicar_app_core::{
     OperationStatus, SnapshotPhase,
 };
 use dicar_desktop_lib::{
-    connect_core, AppState, EndpointDto, FrontendEvent, FrontendEventPayload,
-    FrontendEventSequencer, FrontendSink,
+    connect_core, list_serial_ports_core, AppState, EndpointDto, FrontendEvent,
+    FrontendEventPayload, FrontendEventSequencer, FrontendSink,
 };
 
 #[derive(Default)]
@@ -16,26 +16,18 @@ struct RecordingSink {
 }
 
 #[test]
-fn typed_connect_rejects_an_endpoint_other_than_the_actor_configuration() {
-    let server = SimulatorServer::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
-    let state = AppState::spawn(CoreConfig::simulator(server.local_addr())).unwrap();
-    let mismatched: EndpointDto = serde_json::from_value(serde_json::json!({
+fn typed_connect_switches_runtime_endpoints_and_validates_serial_before_dispatch() {
+    let configured_server = SimulatorServer::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+    let selected_server = SimulatorServer::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+    let state = AppState::spawn(CoreConfig::simulator(configured_server.local_addr())).unwrap();
+    let selected: EndpointDto = serde_json::from_value(serde_json::json!({
         "kind": "simulator",
-        "address": "127.0.0.1:65530"
+        "address": selected_server.local_addr().to_string()
     }))
     .unwrap();
 
-    let error = connect_core(&state, mismatched).unwrap_err();
-    assert_eq!(error.code, "endpointMismatch");
-    assert_eq!(state.snapshot().phase, SnapshotPhase::Disconnected);
-
-    let configured: EndpointDto = serde_json::from_value(serde_json::json!({
-        "kind": "simulator",
-        "address": server.local_addr().to_string()
-    }))
-    .unwrap();
     assert_eq!(
-        connect_core(&state, configured).unwrap().status,
+        connect_core(&state, selected).unwrap().status,
         OperationStatus::Succeeded
     );
     let snapshot = serde_json::to_value(state.snapshot()).unwrap();
@@ -43,11 +35,33 @@ fn typed_connect_rejects_an_endpoint_other_than_the_actor_configuration() {
         snapshot["transportIdentity"]["endpoint"],
         serde_json::json!({
             "kind": "simulator",
-            "address": server.local_addr().to_string()
+            "address": selected_server.local_addr().to_string()
         })
     );
+    state.dispatch(CoreCommand::Disconnect).unwrap();
+
+    let serial: EndpointDto = serde_json::from_value(serde_json::json!({
+        "kind": "serial",
+        "portName": "",
+        "baudRate": 921600
+    }))
+    .unwrap();
+    let error = connect_core(&state, serial).unwrap_err();
+    assert_eq!(error.code, "invalidEndpoint");
+    assert_eq!(state.snapshot().phase, SnapshotPhase::Disconnected);
+
     drop(state);
-    server.shutdown().unwrap();
+    configured_server.shutdown().unwrap();
+    selected_server.shutdown().unwrap();
+}
+
+#[test]
+fn serial_discovery_returns_ports_in_stable_name_order_when_available() {
+    if let Ok(ports) = list_serial_ports_core() {
+        assert!(ports
+            .windows(2)
+            .all(|pair| pair[0].port_name <= pair[1].port_name));
+    }
 }
 
 #[test]

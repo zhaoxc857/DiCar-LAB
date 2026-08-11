@@ -17,11 +17,11 @@ use dctp_protocol::{
 
 use crate::{
     bridge_model::{merge_diagnostics, parameter_snapshots},
-    AccessProfile, AppSnapshot, BridgeError, CommitFailureKind, ConnectionLoss, CoreError,
-    CoreEvent, CoreEventPayload, Endpoint, LeaseState, OperationId, OperationResult,
+    AccessProfile, ActiveTransport, AppSnapshot, BridgeError, CommitFailureKind, ConnectionLoss,
+    CoreError, CoreEvent, CoreEventPayload, Endpoint, LeaseState, OperationId, OperationResult,
     OperationStatus, ParamValueDto, ParameterWorkspace, ProtocolSession, SnapshotPhase,
-    SystemClock, SystemNonce, TcpTransport, TelemetryEngine, TelemetrySubscriptionSnapshot,
-    Transport, TransportIdentity, UiTelemetryBatch, WriteFailure,
+    SystemClock, SystemNonce, TelemetryEngine, TelemetrySubscriptionSnapshot, Transport,
+    TransportIdentity, UiTelemetryBatch, WriteFailure,
 };
 
 const COMMAND_CAPACITY: usize = 64;
@@ -112,6 +112,9 @@ impl CoreConfig {
 #[derive(Clone, Debug, PartialEq)]
 pub enum CoreCommand {
     Connect,
+    ConnectTo {
+        endpoint: Endpoint,
+    },
     Disconnect,
     WriteParameter {
         param_id: u32,
@@ -513,7 +516,7 @@ struct ActorRuntime {
     config: CoreConfig,
     snapshot: Arc<RwLock<AppSnapshot>>,
     mailbox: Arc<EventMailbox>,
-    session: Option<ProtocolSession<TcpTransport>>,
+    session: Option<ProtocolSession<ActiveTransport>>,
     workspace: Option<ParameterWorkspace>,
     device: Option<crate::ConnectedDevice>,
     transport_identity: Option<TransportIdentity>,
@@ -593,7 +596,8 @@ impl ActorRuntime {
 
     fn handle_command(&mut self, envelope: CommandEnvelope) {
         let result = match envelope.command {
-            CoreCommand::Connect => self.connect(),
+            CoreCommand::Connect => self.connect(self.config.endpoint.clone()),
+            CoreCommand::ConnectTo { endpoint } => self.connect(endpoint),
             CoreCommand::Disconnect => self.disconnect_explicit(),
             CoreCommand::WriteParameter { param_id, value } => {
                 self.write_parameter(param_id, value.into())
@@ -618,15 +622,13 @@ impl ActorRuntime {
         self.complete(envelope.operation_id, result);
     }
 
-    fn connect(&mut self) -> Result<&'static str, String> {
+    fn connect(&mut self, endpoint: Endpoint) -> Result<&'static str, String> {
         if self.session.is_some() {
             return Err("设备已经连接".into());
         }
         self.set_phase(SnapshotPhase::Connecting);
-        let transport = match self.config.endpoint {
-            Endpoint::Simulator { address } => TcpTransport::connect(address),
-        }
-        .map_err(|error| error.to_string())?;
+        self.config.endpoint = endpoint.clone();
+        let transport = ActiveTransport::connect(&endpoint).map_err(|error| error.to_string())?;
         self.transport_identity = Some(transport.identity());
         let mut session =
             ProtocolSession::new(transport, SystemNonce::default(), SystemClock::new());

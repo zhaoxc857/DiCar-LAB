@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
 
-use dicar_app_core::{CoreCommand, Endpoint, OperationResult};
+use dicar_app_core::{
+    available_serial_ports, CoreCommand, Endpoint, OperationResult, SerialPortDescriptor,
+};
 use serde::Deserialize;
 
 use crate::{AppState, BridgeErrorDto};
@@ -15,9 +17,14 @@ use std::sync::Arc;
 use tauri::{ipc::Channel, State, WebviewWindow};
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum EndpointDto {
     Simulator { address: String },
+    Serial { port_name: String, baud_rate: u32 },
 }
 
 impl EndpointDto {
@@ -28,6 +35,24 @@ impl EndpointDto {
                     BridgeErrorDto::new("invalidEndpoint", "模拟器地址必须是有效的 IP:端口")
                 })?;
                 Ok(Endpoint::Simulator { address })
+            }
+            Self::Serial {
+                port_name,
+                baud_rate,
+            } => {
+                if port_name.trim().is_empty() {
+                    return Err(BridgeErrorDto::new("invalidEndpoint", "请选择一个真实串口"));
+                }
+                if ![115_200, 460_800, 921_600].contains(&baud_rate) {
+                    return Err(BridgeErrorDto::new(
+                        "invalidEndpoint",
+                        "波特率必须是 115200、460800 或 921600",
+                    ));
+                }
+                Ok(Endpoint::Serial {
+                    port_name,
+                    baud_rate,
+                })
             }
         }
     }
@@ -103,13 +128,13 @@ pub fn connect_core(
     endpoint: EndpointDto,
 ) -> Result<OperationResult, BridgeErrorDto> {
     let endpoint = endpoint.into_core()?;
-    if &endpoint != state.configured_endpoint() {
-        return Err(BridgeErrorDto::new(
-            "endpointMismatch",
-            "当前核心服务已绑定到另一个模拟器地址",
-        ));
-    }
-    state.dispatch(CoreCommand::Connect)
+    state.dispatch(CoreCommand::ConnectTo { endpoint })
+}
+
+pub fn list_serial_ports_core() -> Result<Vec<SerialPortDescriptor>, BridgeErrorDto> {
+    available_serial_ports().map_err(|error| {
+        BridgeErrorDto::new("serialDiscoveryFailed", format!("串口枚举失败：{error}"))
+    })
 }
 
 #[cfg(any(target_env = "msvc", feature = "native-check"))]
@@ -119,6 +144,12 @@ pub fn connect(
     endpoint: EndpointDto,
 ) -> Result<OperationResult, BridgeErrorDto> {
     connect_core(state.inner(), endpoint)
+}
+
+#[cfg(any(target_env = "msvc", feature = "native-check"))]
+#[tauri::command]
+pub fn list_serial_ports() -> Result<Vec<SerialPortDescriptor>, BridgeErrorDto> {
+    list_serial_ports_core()
 }
 
 #[cfg(any(target_env = "msvc", feature = "native-check"))]

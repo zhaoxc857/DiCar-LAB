@@ -1,7 +1,20 @@
-export type Endpoint = {
-  kind: "simulator";
-  address: string;
-};
+export type Endpoint =
+  | { kind: "simulator"; address: string }
+  | { kind: "serial"; portName: string; baudRate: number };
+
+export interface SerialPortDescriptor {
+  portName: string;
+  displayName: string;
+  vendorId: number | null;
+  productId: number | null;
+}
+
+export function endpointLabel(endpoint: Endpoint | null): string {
+  if (endpoint === null) return "尚未建立";
+  return endpoint.kind === "simulator"
+    ? `TCP ${endpoint.address}`
+    : `${endpoint.portName} @ ${endpoint.baudRate}`;
+}
 
 export type TransportIdentity = {
   endpoint: Endpoint;

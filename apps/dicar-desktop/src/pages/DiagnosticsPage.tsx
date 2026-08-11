@@ -1,12 +1,13 @@
 import { ArrowLeft, CheckCircle, WarningCircle } from "@phosphor-icons/react";
 import { Link } from "react-router";
 import { Card } from "../components/ui/card";
+import { endpointLabel } from "../domain/types";
 import { connectionLabel, useConnectionStore } from "../stores/connectionStore";
 
 export function DiagnosticsPage() {
   const snapshot = useConnectionStore((state) => state.snapshot);
   const ready = snapshot?.phase === "ready";
-  const endpoint = snapshot?.transportIdentity?.endpoint.address ?? "尚未建立";
+  const endpoint = endpointLabel(snapshot?.transportIdentity?.endpoint ?? null);
   const session = snapshot?.sessionId == null ? "—" : `0x${snapshot.sessionId.toString(16).padStart(8, "0")}`;
   const firmware = snapshot?.firmwareVersion?.join(".") ?? "—";
   const diagnostics = snapshot?.diagnostics;

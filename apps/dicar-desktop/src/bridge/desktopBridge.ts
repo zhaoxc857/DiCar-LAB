@@ -5,11 +5,13 @@ import type {
   Endpoint,
   OperationResult,
   ParameterValue,
+  SerialPortDescriptor,
   TelemetrySubscriptionRequest,
   WindowCloseDecision,
 } from "../domain/types";
 
 export interface DesktopBridge {
+  listSerialPorts(): Promise<SerialPortDescriptor[]>;
   connect(endpoint: Endpoint): Promise<OperationResult>;
   disconnect(): Promise<OperationResult>;
   writeParameter(paramId: number, value: ParameterValue): Promise<OperationResult>;

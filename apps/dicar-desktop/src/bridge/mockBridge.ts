@@ -6,6 +6,7 @@ import type {
   OperationResult,
   ParameterSnapshot,
   ParameterValue,
+  SerialPortDescriptor,
   TelemetryDescriptor,
   TelemetryPoint,
   TelemetrySubscriptionRequest,
@@ -130,12 +131,19 @@ export class MockBridge implements DesktopBridge {
   #history: Array<{ paramId: number; value: ParameterValue }> = [];
   #snapshot = disconnectedSnapshot();
 
+  async listSerialPorts(): Promise<SerialPortDescriptor[]> {
+    throw new Error("当前 Web 预览不能访问真实串口，请使用桌面 App");
+  }
+
   async subscribe(listener: BridgeListener): Promise<() => void> {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   }
 
   async connect(endpoint: Endpoint): Promise<OperationResult> {
+    if (endpoint.kind === "serial") {
+      return this.#fail("当前 Web 预览不能访问真实串口，请使用桌面 App");
+    }
     this.#snapshot = {
       ...this.#snapshot,
       revision: this.#snapshot.revision + 1,

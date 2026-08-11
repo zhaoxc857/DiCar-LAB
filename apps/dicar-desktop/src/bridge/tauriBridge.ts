@@ -6,12 +6,17 @@ import type {
   Endpoint,
   OperationResult,
   ParameterValue,
+  SerialPortDescriptor,
   TelemetrySubscriptionRequest,
   WindowCloseDecision,
 } from "../domain/types";
 import type { DesktopBridge } from "./desktopBridge";
 
 export class TauriBridge implements DesktopBridge {
+  listSerialPorts(): Promise<SerialPortDescriptor[]> {
+    return invoke("list_serial_ports");
+  }
+
   connect(endpoint: Endpoint): Promise<OperationResult> {
     return invoke("connect", { endpoint });
   }

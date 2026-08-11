@@ -32,4 +32,7 @@ pub use telemetry_engine::{
     TelemetryDiagnostics, TelemetryEngine, TelemetryError, TelemetryPoint, TelemetryValue,
     UiTelemetryBatch,
 };
-pub use transport::{Endpoint, TcpTransport, Transport, TransportIdentity};
+pub use transport::{
+    available_serial_ports, ActiveTransport, Endpoint, SerialPortDescriptor, SerialTransport,
+    TcpTransport, Transport, TransportIdentity,
+};

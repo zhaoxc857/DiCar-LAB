@@ -9,6 +9,7 @@ license.workspace = true
 crossbeam-channel = "0.5"
 dctp-protocol = { path = "../dctp-protocol" }
 serde = { version = "1", features = ["derive"] }
+serialport = { version = "4.9.0", default-features = false }
 
 [dev-dependencies]
 dctp-sim = { path = "../dctp-sim" }
