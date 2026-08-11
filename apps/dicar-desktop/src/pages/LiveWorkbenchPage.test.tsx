@@ -17,6 +17,7 @@ it("runs the B-to-A tuning flow with permissions, RAM truth, and commit review",
   fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
   expect(await screen.findByText("已就绪")).toBeInTheDocument();
   expect(screen.getByText(/19 个设备参数/)).toBeInTheDocument();
+  expect(screen.getByText("8/8 通道")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: /速度环 PID/ }));
   fireEvent.change(screen.getByLabelText("速度环 Kp"), { target: { value: "1.8" } });

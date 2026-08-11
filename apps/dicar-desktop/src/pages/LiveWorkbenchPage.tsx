@@ -5,7 +5,7 @@ import { CommitReviewDialog } from "../components/workbench/CommitReviewDialog";
 import { LeasePanel } from "../components/workbench/LeasePanel";
 import { ParameterEditor } from "../components/workbench/ParameterEditor";
 import { ParameterNav } from "../components/workbench/ParameterNav";
-import { WaveformPreviewPanel } from "../components/workbench/WaveformPreviewPanel";
+import { WaveformPanel } from "../components/workbench/WaveformPanel";
 import { useConnectionStore } from "../stores/connectionStore";
 
 export function LiveWorkbenchPage() {
@@ -33,7 +33,7 @@ export function LiveWorkbenchPage() {
     <div className="mt-3 grid min-h-[560px] gap-3 xl:grid-cols-[264px_minmax(420px,1fr)_minmax(440px,1.15fr)]">
       <ParameterNav onSelectGroup={chooseGroup} onSelectParameter={setSelectedParamId} records={records} selectedGroup={selectedGroup} selectedParamId={selectedParamId} />
       <ParameterEditor group={selectedGroup} record={selectedRecord} records={records} />
-      <WaveformPreviewPanel descriptors={snapshot?.telemetryDescriptors ?? []} />
+      <WaveformPanel descriptors={snapshot?.telemetryDescriptors ?? []} />
     </div>
     <ChangeBar dirtyCount={dirty.length} onReview={() => setReviewOpen(true)} />
     <CommitReviewDialog onClose={() => setReviewOpen(false)} open={reviewOpen} records={dirty} />

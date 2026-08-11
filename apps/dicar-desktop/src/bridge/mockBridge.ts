@@ -157,6 +157,7 @@ export class MockBridge implements DesktopBridge {
     };
     this.#snapshot.desiredSubscription = this.#snapshot.activeSubscription;
     this.#publish({ event: "snapshotChanged", data: this.#snapshot });
+    this.advanceTelemetry(200);
     return this.#complete("已连接模拟器");
   }
 
@@ -265,6 +266,7 @@ export class MockBridge implements DesktopBridge {
       paused: false,
     };
     this.#publishSnapshot();
+    this.advanceTelemetry(50);
     return this.#complete("遥测订阅已生效");
   }
 
