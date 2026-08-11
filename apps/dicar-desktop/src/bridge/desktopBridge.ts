@@ -11,7 +11,9 @@ import type {
 } from "../domain/types";
 
 export interface DesktopBridge {
+  readonly serialAccessMode?: "browser";
   listSerialPorts(): Promise<SerialPortDescriptor[]>;
+  requestSerialPort?(): Promise<SerialPortDescriptor>;
   connect(endpoint: Endpoint): Promise<OperationResult>;
   disconnect(): Promise<OperationResult>;
   writeParameter(paramId: number, value: ParameterValue): Promise<OperationResult>;

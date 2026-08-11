@@ -2,6 +2,7 @@ import { createContext, useContext, useState, type PropsWithChildren } from "rea
 import type { DesktopBridge } from "../bridge/desktopBridge";
 import { MockBridge } from "../bridge/mockBridge";
 import { TauriBridge } from "../bridge/tauriBridge";
+import { WebSerialBridge, type BrowserSerial } from "../bridge/webSerialBridge";
 import { useBridgeSubscription } from "../hooks/useBridgeSubscription";
 
 const DesktopBridgeContext = createContext<DesktopBridge | null>(null);
@@ -36,6 +37,9 @@ export function useDesktopBridge(): DesktopBridge {
 function createDefaultBridge(): DesktopBridge {
   if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
     return new TauriBridge();
+  }
+  if (typeof navigator !== "undefined" && "serial" in navigator) {
+    return new WebSerialBridge((navigator as Navigator & { serial: BrowserSerial }).serial);
   }
   return new MockBridge();
 }

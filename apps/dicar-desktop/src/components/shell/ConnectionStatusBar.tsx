@@ -55,6 +55,24 @@ export function ConnectionStatusBar() {
     }
   }
 
+  async function authorizeBrowserPort() {
+    if (bridge.requestSerialPort === undefined) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const port = await bridge.requestSerialPort();
+      setSerialPorts((current) => [
+        ...current.filter(({ portName }) => portName !== port.portName),
+        port,
+      ]);
+      setSelectedPort(port.portName);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const pendingEndpoint = mode === "simulator"
     ? "TCP 127.0.0.1:7100 · 模拟器"
     : selectedPort ? `${selectedPort} @ ${baudRate}` : "等待选择 COM";
@@ -87,6 +105,11 @@ export function ConnectionStatusBar() {
               <Select aria-label="串口波特率" className="h-8 w-28 font-mono text-xs" disabled={ready || busy} onChange={(event) => setBaudRate(Number(event.currentTarget.value))} value={baudRate}>
                 {[921600, 460800, 115200].map((rate) => <option key={rate} value={rate}>{rate}</option>)}
               </Select>
+              {bridge.serialAccessMode === "browser" && (
+                <Button disabled={ready || busy} onClick={() => void authorizeBrowserPort()} size="sm" variant="secondary">
+                  授权浏览器串口
+                </Button>
+              )}
             </>
           )}
           <Button disabled={busy || (!ready && mode === "serial" && selectedPort === "")} onClick={() => void toggleConnection()} size="sm" variant={ready ? "secondary" : "primary"}>
