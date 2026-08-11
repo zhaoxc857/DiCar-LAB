@@ -5,6 +5,24 @@ on:
   pull_request:
 
 jobs:
+  desktop-web:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm --filter @dicar/desktop test --run
+      - run: pnpm build
+      - run: pnpm test:e2e
+
   rust:
     strategy:
       matrix:

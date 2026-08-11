@@ -1,4 +1,31 @@
-# DCTP v1 protocol foundation
+# DiCar LAB
+
+DiCar LAB 的首版是面向电子设计大赛和智能车竞赛的无线调参工作台。主页采用菜单式入口，实时工作台提供参数编辑、编码器标定、最多 8 路波形、RAM/Flash 状态和本地演示权限控制。
+
+## 运行 Web 初版
+
+需要 Node.js 22 和 pnpm 11：
+
+```text
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+浏览器打开 `http://127.0.0.1:5173/`。纯 Web 环境默认使用确定性模拟设备，可直接体验“连接 → 调参 → 波形 → 审阅固化”的完整流程；真实设备接入由 Tauri/DCTP 桥接负责。
+
+关键前端验证：
+
+```text
+pnpm lint
+pnpm typecheck
+pnpm --filter @dicar/desktop test --run
+pnpm build
+pnpm test:e2e
+```
+
+Windows 安装包命令为 `pnpm --filter @dicar/desktop tauri:build`，需要 Visual Studio C++ Build Tools 和正式应用图标。
+
+## DCTP v1 protocol foundation
 
 `dctp-protocol` contains the DCTP v1 wire codec and payload models. It performs no serial I/O.
 `dctp-sim` is the deterministic TCP test transport used by the next desktop-client plan.
