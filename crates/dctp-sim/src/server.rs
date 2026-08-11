@@ -72,56 +72,109 @@ impl Drop for SimulatorServer {
 
 fn run_listener(listener: TcpListener, shutdown: Arc<AtomicBool>) -> io::Result<()> {
     let device = Arc::new(Mutex::new(SimDevice::new(SimConfig::default())));
-    let client_active = Arc::new(AtomicBool::new(false));
     let started_at = Instant::now();
+    let mut active_client = None;
 
-    while !shutdown.load(Ordering::Acquire) {
+    let listener_result = loop {
+        if shutdown.load(Ordering::Acquire) {
+            break Ok(());
+        }
+        reap_finished_client(&mut active_client);
         match listener.accept() {
             Ok((mut stream, _)) => {
-                if client_active
-                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-                    .is_err()
-                {
+                reap_finished_client(&mut active_client);
+                if active_client.is_some() {
                     let _ = stream.write_all(CLIENT_REJECTION);
                     let _ = stream.shutdown(Shutdown::Both);
                     continue;
                 }
 
-                let device = Arc::clone(&device);
-                let client_active = Arc::clone(&client_active);
-                thread::spawn(move || {
-                    let _slot = ClientSlot(client_active);
-                    if let Err(error) = serve_client(&mut stream, &device, started_at) {
-                        eprintln!("dctp-sim client: {error}");
-                    }
-                });
+                match ClientWorker::spawn(
+                    stream,
+                    Arc::clone(&device),
+                    Arc::clone(&shutdown),
+                    started_at,
+                ) {
+                    Ok(worker) => active_client = Some(worker),
+                    Err(error) => break Err(error),
+                }
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(5));
             }
-            Err(error) => return Err(error),
+            Err(error) => break Err(error),
         }
-    }
+    };
 
-    Ok(())
+    let client_result = match active_client.take() {
+        Some(worker) => worker.shutdown_and_join(),
+        None => Ok(()),
+    };
+    match listener_result {
+        Err(error) => Err(error),
+        Ok(()) => client_result,
+    }
 }
 
-struct ClientSlot(Arc<AtomicBool>);
+struct ClientWorker {
+    shutdown_stream: TcpStream,
+    thread: JoinHandle<io::Result<()>>,
+}
 
-impl Drop for ClientSlot {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
+impl ClientWorker {
+    fn spawn(
+        mut stream: TcpStream,
+        device: Arc<Mutex<SimDevice>>,
+        shutdown: Arc<AtomicBool>,
+        started_at: Instant,
+    ) -> io::Result<Self> {
+        let shutdown_stream = stream.try_clone()?;
+        let thread =
+            thread::spawn(move || serve_client(&mut stream, &device, &shutdown, started_at));
+        Ok(Self {
+            shutdown_stream,
+            thread,
+        })
+    }
+
+    fn is_finished(&self) -> bool {
+        self.thread.is_finished()
+    }
+
+    fn join(self) -> io::Result<()> {
+        self.thread
+            .join()
+            .map_err(|_| io::Error::other("simulator client thread panicked"))?
+    }
+
+    fn shutdown_and_join(self) -> io::Result<()> {
+        let _ = self.shutdown_stream.shutdown(Shutdown::Both);
+        self.join()
+    }
+}
+
+fn reap_finished_client(active_client: &mut Option<ClientWorker>) {
+    if active_client
+        .as_ref()
+        .is_some_and(ClientWorker::is_finished)
+    {
+        let worker = active_client.take().expect("finished client is present");
+        if let Err(error) = worker.join() {
+            eprintln!("dctp-sim client: {error}");
+        }
     }
 }
 
 fn serve_client(
     stream: &mut TcpStream,
     device: &Arc<Mutex<SimDevice>>,
+    shutdown: &Arc<AtomicBool>,
     started_at: Instant,
 ) -> io::Result<()> {
-    let result = serve_client_loop(stream, device, started_at);
+    let result = serve_client_loop(stream, device, shutdown, started_at);
     let reset_result = lock_device(device).map(|mut device| device.disconnect());
     match result {
+        _ if shutdown.load(Ordering::Acquire) => reset_result,
         Err(error) => Err(error),
         Ok(()) => reset_result,
     }
@@ -130,6 +183,7 @@ fn serve_client(
 fn serve_client_loop(
     stream: &mut TcpStream,
     device: &Arc<Mutex<SimDevice>>,
+    shutdown: &Arc<AtomicBool>,
     started_at: Instant,
 ) -> io::Result<()> {
     stream.set_nonblocking(true)?;
@@ -138,6 +192,9 @@ fn serve_client_loop(
     let mut buffer = [0u8; 1_100];
 
     loop {
+        if shutdown.load(Ordering::Acquire) {
+            return Ok(());
+        }
         for _ in 0..MAX_READS_PER_POLL {
             match stream.read(&mut buffer) {
                 Ok(0) => return Ok(()),
