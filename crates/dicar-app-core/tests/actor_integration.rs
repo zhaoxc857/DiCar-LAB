@@ -62,6 +62,8 @@ fn actor_connects_writes_subscribes_pauses_and_streams_ordered_events() {
         actor.snapshot().phase == SnapshotPhase::Ready
     });
     let ready = actor.snapshot();
+    assert_eq!(ready.link_budget.as_ref().unwrap().max_channels, 8);
+    assert_eq!(ready.link_budget.as_ref().unwrap().max_sample_rate_hz, 500);
     assert!(ready
         .parameters
         .iter()

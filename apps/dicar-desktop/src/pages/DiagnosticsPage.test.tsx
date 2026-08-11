@@ -21,4 +21,6 @@ it("shows live snapshot identity and link diagnostics with text labels", async (
   expect(screen.getByText("CRC 错误")).toBeInTheDocument();
   expect(screen.getByText("设备丢样")).toBeInTheDocument();
   expect(screen.getByText("UI 丢批次")).toBeInTheDocument();
+  expect(screen.getByText("遥测安全上限")).toBeInTheDocument();
+  expect(screen.getByText("8 通道 × 500 Hz")).toBeInTheDocument();
 });

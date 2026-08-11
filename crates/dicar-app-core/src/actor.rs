@@ -17,11 +17,11 @@ use dctp_protocol::{
 
 use crate::{
     bridge_model::{merge_diagnostics, parameter_snapshots},
-    AccessProfile, ActiveTransport, AppSnapshot, BridgeError, CommitFailureKind, ConnectionLoss,
-    CoreError, CoreEvent, CoreEventPayload, Endpoint, LeaseState, OperationId, OperationResult,
-    OperationStatus, ParamValueDto, ParameterWorkspace, ProtocolSession, SnapshotPhase,
-    SystemClock, SystemNonce, TelemetryEngine, TelemetrySubscriptionSnapshot, Transport,
-    TransportIdentity, UiTelemetryBatch, WriteFailure,
+    link_budget, validate_subscription, AccessProfile, ActiveTransport, AppSnapshot, BridgeError,
+    CommitFailureKind, ConnectionLoss, CoreError, CoreEvent, CoreEventPayload, Endpoint,
+    LeaseState, OperationId, OperationResult, OperationStatus, ParamValueDto, ParameterWorkspace,
+    ProtocolSession, SnapshotPhase, SystemClock, SystemNonce, TelemetryEngine,
+    TelemetrySubscriptionSnapshot, Transport, TransportIdentity, UiTelemetryBatch, WriteFailure,
 };
 
 const COMMAND_CAPACITY: usize = 64;
@@ -793,8 +793,21 @@ impl ActorRuntime {
         channel_ids: Vec<u32>,
         sample_rate_hz: u16,
     ) -> Result<&'static str, String> {
+        let telemetry_descriptors = self
+            .device
+            .as_ref()
+            .ok_or("设备未连接")?
+            .manifest
+            .telemetry
+            .clone();
+        let endpoint = &self
+            .transport_identity
+            .as_ref()
+            .ok_or("设备未连接")?
+            .endpoint;
+        validate_subscription(endpoint, channel_ids.len(), sample_rate_hz)
+            .map_err(|error| error.to_string())?;
         let version = self.take_subscription_version();
-        let device = self.device.as_ref().ok_or("设备未连接")?;
         let subscription = TelemetrySubscription {
             subscription_version: version,
             sample_rate_hz,
@@ -802,7 +815,7 @@ impl ActorRuntime {
         };
         let mut candidate = self.telemetry.clone();
         candidate
-            .activate(subscription.clone(), &device.manifest.telemetry)
+            .activate(subscription.clone(), &telemetry_descriptors)
             .map_err(|error| error.to_string())?;
         let session = self.session.as_mut().ok_or("设备未连接")?;
         session
@@ -993,6 +1006,11 @@ impl ActorRuntime {
         current.access_profile = self.access.into();
         current.desired_subscription = self.desired_subscription.clone();
         current.active_subscription = self.active_subscription.clone();
+        current.link_budget = self
+            .session
+            .as_ref()
+            .and(self.transport_identity.as_ref())
+            .map(|identity| link_budget(&identity.endpoint));
         current.paused = self.paused;
         current.telemetry_points = self.telemetry.total_points();
         current.diagnostics = merge_diagnostics(

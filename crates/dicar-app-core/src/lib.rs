@@ -4,6 +4,7 @@ mod bridge_model;
 mod clock;
 mod error;
 mod hardware_profile;
+mod link_budget;
 mod model;
 mod parameter_workspace;
 mod session;
@@ -23,6 +24,7 @@ pub use bridge_model::{
 pub use clock::{Clock, FixedNonce, NonceSource, SystemClock, SystemNonce, TestClock};
 pub use error::{CoreError, TransportError};
 pub use hardware_profile::{SerialHardwareProfile, TelemetryBudget};
+pub use link_budget::{link_budget, validate_subscription, LinkBudgetError, LinkBudgetSnapshot};
 pub use model::{ConnectedDevice, ConnectionPhase, DeviceIdentity, DiagnosticsSnapshot};
 pub use parameter_workspace::{
     CommitFailureKind, CommitPlan, ConfirmedChange, DeviceSyncState, OperationToken,

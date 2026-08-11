@@ -44,6 +44,7 @@ function disconnectedSnapshot(): AppSnapshot {
     accessProfile: { role: "owner", leaseActive: true, localDemoOnly: true },
     desiredSubscription: null,
     activeSubscription: null,
+    linkBudget: null,
     paused: false,
     telemetryPoints: 0,
     diagnostics: {
@@ -162,6 +163,13 @@ export class MockBridge implements DesktopBridge {
         sampleRateHz: 500,
         channelIds: telemetryDescriptors.slice(0, 8).map(({ channelId }) => channelId),
       },
+      linkBudget: {
+        hardwareProfile: null,
+        baudRate: null,
+        maxChannels: 8,
+        maxSampleRateHz: 500,
+        reason: "内置模拟器支持完整 8 通道 × 500 Hz 遥测",
+      },
     };
     this.#snapshot.desiredSubscription = this.#snapshot.activeSubscription;
     this.#publish({ event: "snapshotChanged", data: this.#snapshot });
@@ -249,13 +257,15 @@ export class MockBridge implements DesktopBridge {
     if (this.#snapshot.phase !== "ready") return this.#fail("设备未连接");
     const unique = new Set(request.channelIds);
     const known = new Set(this.#snapshot.telemetryDescriptors.map(({ channelId }) => channelId));
+    const maxChannels = this.#snapshot.linkBudget?.maxChannels ?? 8;
+    const maxSampleRateHz = this.#snapshot.linkBudget?.maxSampleRateHz ?? 500;
     if (
       request.channelIds.length === 0 ||
-      request.channelIds.length > 8 ||
+      request.channelIds.length > maxChannels ||
       unique.size !== request.channelIds.length ||
       request.channelIds.some((channelId) => !known.has(channelId)) ||
       request.sampleRateHz < 1 ||
-      request.sampleRateHz > 500
+      request.sampleRateHz > maxSampleRateHz
     ) {
       return this.#fail("遥测订阅必须包含 1–8 个唯一已知通道，采样率为 1–500 Hz");
     }
@@ -470,6 +480,7 @@ export class MockBridge implements DesktopBridge {
       phase: "disconnected",
       sessionId: null,
       activeSubscription: null,
+      linkBudget: null,
       paused: true,
       lastDisconnectReason: reason,
       parameters: this.#snapshot.parameters.map((parameter) => ({

@@ -134,6 +134,14 @@ export interface DiagnosticsSnapshot {
   uiDroppedBatches: number;
 }
 
+export interface LinkBudgetSnapshot {
+  hardwareProfile: SerialHardwareProfile | null;
+  baudRate: number | null;
+  maxChannels: number;
+  maxSampleRateHz: number;
+  reason: string;
+}
+
 export interface AppSnapshot {
   revision: number;
   phase: SnapshotPhase;
@@ -148,6 +156,7 @@ export interface AppSnapshot {
   accessProfile: AccessProfile;
   desiredSubscription: TelemetrySubscriptionSnapshot | null;
   activeSubscription: TelemetrySubscriptionSnapshot | null;
+  linkBudget: LinkBudgetSnapshot | null;
   paused: boolean;
   telemetryPoints: number;
   diagnostics: DiagnosticsSnapshot;

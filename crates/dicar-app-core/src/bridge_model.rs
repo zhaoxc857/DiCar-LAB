@@ -2,8 +2,8 @@ use dctp_protocol::{ParamFlags, ParamValue, TelemetryDescriptor};
 use serde::Serialize;
 
 use crate::{
-    AccessProfile, AccessRole, ConnectionPhase, DeviceSyncState, LeaseState, ParameterWorkspace,
-    TelemetryDiagnostics, TransportIdentity, UiTelemetryBatch, WriteState,
+    AccessProfile, AccessRole, ConnectionPhase, DeviceSyncState, LeaseState, LinkBudgetSnapshot,
+    ParameterWorkspace, TelemetryDiagnostics, TransportIdentity, UiTelemetryBatch, WriteState,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize)]
@@ -197,6 +197,7 @@ pub struct AppSnapshot {
     pub access_profile: AccessProfileDto,
     pub desired_subscription: Option<TelemetrySubscriptionSnapshot>,
     pub active_subscription: Option<TelemetrySubscriptionSnapshot>,
+    pub link_budget: Option<LinkBudgetSnapshot>,
     pub paused: bool,
     pub telemetry_points: usize,
     pub diagnostics: ActorDiagnosticsSnapshot,
@@ -220,6 +221,7 @@ impl AppSnapshot {
             access_profile: access_profile.into(),
             desired_subscription: None,
             active_subscription: None,
+            link_budget: None,
             paused: false,
             telemetry_points: 0,
             diagnostics: ActorDiagnosticsSnapshot {
