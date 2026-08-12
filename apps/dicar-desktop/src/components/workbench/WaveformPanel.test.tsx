@@ -138,3 +138,21 @@ it("moves a locked cursor to the retained boundary when its samples roll out", a
   expect(await screen.findByText("游标数据已滚出缓冲，已移至最早样本")).toBeInTheDocument();
   expect(screen.getByRole("status", { name: "波形游标读数" })).toHaveTextContent(/游标 402000 µs/);
 });
+
+it("applies each external request once and preserves later manual choices", async () => {
+  const bridge = new MockBridge();
+  const descriptors = (await bridge.getSnapshot()).telemetryDescriptors;
+  const setSubscription = vi.spyOn(bridge, "setTelemetrySubscription");
+  const { rerender } = render(<AppProviders bridge={bridge}><WaveformPanel descriptors={descriptors} selectionRequest={{ requestId: 1, label: "速度环推荐", channelIds: [207, 200, 208, 209, 210] }} /></AppProviders>);
+  await act(async () => undefined);
+  expect(screen.getByText("5/8 通道")).toBeInTheDocument();
+  expect(setSubscription).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "选择通道 5/8" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "模拟通道 11" }));
+  expect(screen.getByText("4/8 通道")).toBeInTheDocument();
+  rerender(<AppProviders bridge={bridge}><WaveformPanel descriptors={descriptors} selectionRequest={{ requestId: 1, label: "速度环推荐", channelIds: [207, 200, 208, 209, 210] }} /></AppProviders>);
+  expect(screen.getByText("4/8 通道")).toBeInTheDocument();
+  rerender(<AppProviders bridge={bridge}><WaveformPanel descriptors={descriptors} selectionRequest={{ requestId: 2, label: "速度环推荐", channelIds: [207, 200, 208] }} /></AppProviders>);
+  expect(await screen.findByText("3/8 通道")).toBeInTheDocument();
+  expect(setSubscription).not.toHaveBeenCalled();
+});

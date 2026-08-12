@@ -34,6 +34,17 @@ export function clipWorkgroup(group: TelemetryWorkgroup, maxChannels: number): {
   };
 }
 
+export function mergeTelemetryWorkgroups(profileGroups: readonly TelemetryWorkgroup[], automaticGroups: readonly TelemetryWorkgroup[], knownChannelIds: readonly number[]): TelemetryWorkgroup[] {
+  const known = new Set(knownChannelIds);
+  const ids = new Set<string>();
+  return [...profileGroups, ...automaticGroups].flatMap((group) => {
+    if (ids.has(group.id)) throw new Error(`重复工作组 ID ${group.id}`);
+    ids.add(group.id);
+    const channelIds = [...new Set(group.channelIds.filter((channelId) => known.has(channelId)))];
+    return channelIds.length === 0 ? [] : [{ ...group, channelIds }];
+  });
+}
+
 function searchText(descriptor: TelemetryDescriptor): string {
   return `${descriptor.machineName} ${descriptor.displayName} ${descriptor.unit}`;
 }

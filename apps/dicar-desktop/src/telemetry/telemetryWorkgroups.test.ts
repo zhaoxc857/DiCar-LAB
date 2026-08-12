@@ -1,5 +1,5 @@
 import type { TelemetryDescriptor } from "../domain/types";
-import { buildTelemetryWorkgroups, clipWorkgroup } from "./telemetryWorkgroups";
+import { buildTelemetryWorkgroups, clipWorkgroup, mergeTelemetryWorkgroups } from "./telemetryWorkgroups";
 
 const descriptors: TelemetryDescriptor[] = [
   descriptor(20, "motor.left_rpm", "左轮转速", "rpm"),
@@ -32,6 +32,12 @@ it("clips in workgroup order and reports every omitted channel", () => {
     channelIds: [20, 10, 30],
     omittedCount: 2,
   });
+});
+
+it("puts profile presets first, rejects duplicate ids, and filters unavailable channels", () => {
+  const automatic = buildTelemetryWorkgroups(descriptors);
+  expect(mergeTelemetryWorkgroups([{ id: "profile-drive", label: "车型驱动", channelIds: [50, 999, 20, 20] }], automatic, descriptors.map(({ channelId }) => channelId))[0]).toEqual({ id: "profile-drive", label: "车型驱动", channelIds: [50, 20] });
+  expect(() => mergeTelemetryWorkgroups([{ id: "speed", label: "冲突", channelIds: [20] }], automatic, descriptors.map(({ channelId }) => channelId))).toThrow(/重复工作组 ID speed/);
 });
 
 function descriptor(channelId: number, machineName: string, displayName: string, unit: string): TelemetryDescriptor {

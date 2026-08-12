@@ -59,6 +59,7 @@ it("organizes the simulator as a vehicle speed-control workspace", async () => {
   expect(screen.getByText("目标", { exact: true })).toBeInTheDocument();
   expect(screen.getByLabelText("速度环 Kp")).toBeInTheDocument();
   expect(screen.getByText(/设备清单未提供可写目标参数/)).toBeInTheDocument();
+  expect(screen.getByText("5/8 通道")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "全部参数" }));
   expect(screen.getByRole("heading", { name: "参数目录" })).toBeInTheDocument();
 });

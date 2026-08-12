@@ -1,5 +1,5 @@
 import { WaveSine } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChangeBar } from "../components/workbench/ChangeBar";
 import { CommitReviewDialog } from "../components/workbench/CommitReviewDialog";
 import { ControlLoopWorkspace } from "../components/workbench/ControlLoopWorkspace";
@@ -9,6 +9,7 @@ import { ParameterEditor } from "../components/workbench/ParameterEditor";
 import { ParameterNav } from "../components/workbench/ParameterNav";
 import { TypedParameterControl } from "../components/workbench/TypedParameterControl";
 import { WaveformPanel } from "../components/workbench/WaveformPanel";
+import type { WaveformSelectionRequest } from "../components/workbench/WaveformPanel";
 import { WorkspaceNav, type WorkspaceTask } from "../components/workbench/WorkspaceNav";
 import type { ParameterSnapshot } from "../domain/types";
 import { useConnectionStore } from "../stores/connectionStore";
@@ -31,6 +32,8 @@ export function LiveWorkbenchPage() {
   const [selectedGroup, setSelectedGroup] = useState("速度环 PID");
   const [selectedParamId, setSelectedParamId] = useState<number | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [waveformRequest, setWaveformRequest] = useState<WaveformSelectionRequest | null>(null);
+  const requestId = useRef(0);
 
   useEffect(() => {
     const available = availableTasks(workspace);
@@ -47,6 +50,13 @@ export function LiveWorkbenchPage() {
   function chooseGroup(group: string) { setSelectedGroup(group); setSelectedParamId(records.find((record) => record.group === group)?.paramId ?? null); }
   function chooseTask(task: WorkspaceTask) {
     setSelectedTask(task);
+    if (task.kind === "loop") {
+      const loop = workspace.controlLoops.find(({ id }) => id === task.id);
+      if (loop && loop.recommendedChannelIds.length > 0) setWaveformRequest({ requestId: ++requestId.current, label: `${loop.label}推荐`, channelIds: loop.recommendedChannelIds });
+    } else if (task.kind === "section") {
+      const preset = workspace.scopePresets.find(({ id }) => id === task.id);
+      if (preset) setWaveformRequest({ requestId: ++requestId.current, label: preset.label, channelIds: preset.channelIds });
+    }
     if (task.kind === "group") chooseGroup(task.id);
     if (task.kind === "all") setSelectedParamId(records[0]?.paramId ?? null);
   }
@@ -57,7 +67,7 @@ export function LiveWorkbenchPage() {
     <div className="mt-3 grid min-h-[560px] gap-3 xl:grid-cols-[264px_minmax(420px,1fr)_minmax(440px,1.15fr)]">
       <div className="space-y-3"><WorkspaceNav onSelectTask={chooseTask} records={records} selectedTask={selectedTask} workspace={workspace} />{(selectedTask.kind === "all" || selectedTask.kind === "group") && <ParameterNav onSelectGroup={chooseGroup} onSelectParameter={setSelectedParamId} records={selectedTask.kind === "group" ? records.filter((record) => record.group === selectedTask.id) : records} selectedGroup={selectedGroup} selectedParamId={selectedParamId} />}</div>
       <TaskEditor buffer={buffer} records={records} selectedGroup={selectedGroup} selectedRecord={selectedRecord} task={selectedTask} telemetry={telemetry} workspace={workspace} />
-      <WaveformPanel descriptors={telemetry} />
+      <WaveformPanel descriptors={telemetry} profileWorkgroups={workspace.profileId === GENERIC_PROFILE_ID ? [] : workspace.scopePresets} selectionRequest={waveformRequest} />
     </div>
     <ChangeBar dirtyCount={dirty.length} onReview={() => setReviewOpen(true)} />
     <CommitReviewDialog onClose={() => setReviewOpen(false)} open={reviewOpen} records={dirty} />

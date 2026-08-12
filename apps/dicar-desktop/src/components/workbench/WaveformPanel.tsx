@@ -1,16 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDesktopBridge } from "../../app/providers";
 import type { TelemetryDescriptor } from "../../domain/types";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
-import { buildTelemetryWorkgroups, clipWorkgroup } from "../../telemetry/telemetryWorkgroups";
+import { buildTelemetryWorkgroups, clipWorkgroup, mergeTelemetryWorkgroups, type TelemetryWorkgroup } from "../../telemetry/telemetryWorkgroups";
 import { advanceCursor, clampCursorsToBounds, clickCursor, computeChannelRange, type ChannelRange, type WaveformCursorState, type YScaleMode } from "../../telemetry/waveformInteraction";
 import { TelemetryDataTable } from "./TelemetryDataTable";
 import { TelemetryLegend } from "./TelemetryLegend";
 import { TelemetryToolbar } from "./TelemetryToolbar";
 import { WaveformCanvas } from "./WaveformCanvas";
 
-export function WaveformPanel({ descriptors }: { descriptors: TelemetryDescriptor[] }) {
+export type WaveformSelectionRequest = { requestId: number; label: string; channelIds: number[] };
+
+export function WaveformPanel({ descriptors, selectionRequest = null, profileWorkgroups = [] }: { descriptors: TelemetryDescriptor[]; selectionRequest?: WaveformSelectionRequest | null; profileWorkgroups?: TelemetryWorkgroup[] }) {
   const bridge = useDesktopBridge();
   const snapshot = useConnectionStore((state) => state.snapshot);
   const buffer = useWorkspaceStore((state) => state.buffer);
@@ -25,11 +27,12 @@ export function WaveformPanel({ descriptors }: { descriptors: TelemetryDescripto
   const [fixedRanges, setFixedRanges] = useState<Record<number, ChannelRange>>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const lastConsumedRequestId = useRef<number | null>(null);
   const paused = snapshot?.paused ?? false;
   const maxChannels = snapshot?.linkBudget?.maxChannels ?? 8;
   const maxSampleRateHz = snapshot?.linkBudget?.maxSampleRateHz ?? 500;
   const selectedDescriptors = useMemo(() => descriptors.filter(({ channelId }) => selectedIds.includes(channelId)), [descriptors, selectedIds]);
-  const workgroups = useMemo(() => buildTelemetryWorkgroups(descriptors), [descriptors]);
+  const workgroups = useMemo(() => mergeTelemetryWorkgroups(profileWorkgroups, buildTelemetryWorkgroups(descriptors), descriptors.map(({ channelId }) => channelId)), [descriptors, profileWorkgroups]);
   const targetTimestampUs = probeTimestampUs ?? (cursors.activeCursor === "B" ? cursors.cursorBUs : cursors.cursorAUs);
 
   useEffect(() => {
@@ -42,6 +45,19 @@ export function WaveformPanel({ descriptors }: { descriptors: TelemetryDescripto
     });
   }, [descriptors, maxChannels]);
   useEffect(() => { setSampleRateHz((current) => Math.min(current, maxSampleRateHz)); }, [maxSampleRateHz]);
+  useEffect(() => {
+    if (selectionRequest === null || lastConsumedRequestId.current === selectionRequest.requestId) return;
+    lastConsumedRequestId.current = selectionRequest.requestId;
+    const known = new Set(descriptors.map(({ channelId }) => channelId));
+    const available = [...new Set(selectionRequest.channelIds.filter((channelId) => known.has(channelId)))];
+    const selected = available.slice(0, maxChannels);
+    if (selected.length === 0) { setError(`${selectionRequest.label}没有可用通道`); return; }
+    setSelectedIds(selected);
+    setSelectedWorkgroup("custom");
+    setYScaleMode("local");
+    setFixedRanges({});
+    setError(available.length > maxChannels ? `当前链路已保留 ${selected.length} 个通道，省略 ${available.length - selected.length} 个` : null);
+  }, [descriptors, maxChannels, selectionRequest]);
   useEffect(() => {
     const firstTimestamps = selectedIds.map((channelId) => buffer.first(channelId)?.timestampUs).filter((timestampUs): timestampUs is number => timestampUs !== undefined);
     const latestTimestamps = selectedIds.map((channelId) => buffer.latest(channelId)?.timestampUs).filter((timestampUs): timestampUs is number => timestampUs !== undefined);
