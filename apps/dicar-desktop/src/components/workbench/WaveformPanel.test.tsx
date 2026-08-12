@@ -76,7 +76,7 @@ it("changes pending channels through a semantic workgroup only after Apply", asy
   const bridge = new MockBridge();
   const descriptors = (await bridge.getSnapshot()).telemetryDescriptors.map((descriptor, index) => ({
     ...descriptor,
-    machineName: index < 3 ? `motor.wheel_${index}_rpm` : descriptor.machineName,
+    machineName: index < 3 ? `motor.wheel_${index}_rpm` : `other.channel_${index}`,
     displayName: index < 3 ? `电机转速 ${index + 1}` : descriptor.displayName,
   }));
   const setSubscription = vi.spyOn(bridge, "setTelemetrySubscription");

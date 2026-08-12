@@ -20,10 +20,17 @@ type UnindexedBridgeEvent<T = BridgeEvent> = T extends { eventIndex: number }
   ? Omit<T, "eventIndex">
   : never;
 
+const simulatorTelemetryNames = [
+  "drive.speed_mps", "encoder.left_delta", "encoder.left_total", "drive.fault_flags",
+  "encoder.right_total", "drive.left_wheel_speed_mps", "drive.right_wheel_speed_mps", "drive.target_speed_mps",
+  "drive.speed_error_mps", "motor.left_pwm", "motor.right_pwm", "encoder.right_delta",
+  "control.loop_jitter_us", "power.battery_voltage", "steering.error_deg", "system.uptime_ms",
+];
+
 const telemetryDescriptors: TelemetryDescriptor[] = Array.from({ length: 16 }, (_, index) => ({
   channelId: 200 + index,
   telemetryType: index % 4 === 0 ? "f32" : index % 4 === 1 ? "i32" : index % 4 === 2 ? "u32" : "flags32",
-  machineName: `mock.channel_${index}`,
+  machineName: simulatorTelemetryNames[index],
   displayName: `模拟通道 ${index + 1}`,
   group: "模拟遥测",
   unit: index % 4 === 0 ? "m/s" : "raw",
@@ -70,7 +77,7 @@ function disconnectedSnapshot(): AppSnapshot {
 
 function parameterFixtures(): ParameterSnapshot[] {
   return [
-    numericParameter(1, "pid.speed.kp", "速度环 Kp", "速度环 PID", "", "f32", 1.2, 0, 20, 0.01, "比例增益，影响速度误差的即时响应"),
+    numericParameter(1, "pid.kp", "速度环 Kp", "速度环 PID", "", "f32", 1.2, 0, 20, 0.01, "比例增益，影响速度误差的即时响应"),
     numericParameter(2, "pid.speed.ki", "速度环 Ki", "速度环 PID", "", "f32", 0.08, 0, 5, 0.001, "积分增益，用于消除稳态误差"),
     numericParameter(3, "pid.speed.kd", "速度环 Kd", "速度环 PID", "", "f32", 0.002, 0, 1, 0.0001, "微分增益，用于抑制快速变化"),
     numericParameter(4, "control.target_speed_mps", "目标速度", "速度环 PID", "m/s", "f32", 2.5, 0, 8, 0.05, "测试阶段目标车速", true),
@@ -79,12 +86,12 @@ function parameterFixtures(): ParameterSnapshot[] {
     enumParameter(102, "encoder.quadrature_multiplier", "正交倍频", "编码器与车轮", 4, [{ value: 1, label: "×1" }, { value: 2, label: "×2" }, { value: 4, label: "×4" }]),
     boolParameter(103, "encoder.left.inverted", "左侧方向反向", "编码器与车轮", false),
     boolParameter(104, "encoder.right.inverted", "右侧方向反向", "编码器与车轮", true),
-    numericParameter(105, "vehicle.wheel_diameter_mm", "车轮直径", "编码器与车轮", "mm", "f32", 64, 10, 200, 0.1),
-    numericParameter(106, "vehicle.gear_ratio", "传动比", "编码器与车轮", "ratio", "f32", 1, 0.01, 20, 0.001),
-    numericParameter(107, "encoder.sample_period_ms", "测速采样周期", "编码器与车轮", "ms", "u32", 2, 1, 100, 1),
+    numericParameter(105, "drive.wheel_diameter_mm", "车轮直径", "编码器与车轮", "mm", "f32", 64, 10, 200, 0.1),
+    numericParameter(106, "drive.gear_ratio", "传动比", "编码器与车轮", "ratio", "f32", 1, 0.01, 20, 0.001),
+    numericParameter(107, "encoder.sample_period_us", "测速采样周期", "编码器与车轮", "µs", "u32", 2000, 100, 100000, 100),
     numericParameter(108, "encoder.speed_lpf_hz", "速度低通截止频率", "编码器与车轮", "Hz", "f32", 35, 0.1, 250, 0.1),
-    numericParameter(109, "encoder.jump_threshold", "计数跳变阈值", "编码器与车轮", "count", "u32", 240, 1, 10000, 1),
-    numericParameter(110, "encoder.credible_rpm", "可信最高转速", "编码器与车轮", "rpm", "u32", 6000, 1, 100000, 10),
+    numericParameter(109, "encoder.jump_threshold_counts", "计数跳变阈值", "编码器与车轮", "count", "u32", 240, 1, 10000, 1),
+    numericParameter(110, "encoder.max_credible_rpm", "可信最高转速", "编码器与车轮", "rpm", "u32", 6000, 1, 100000, 10),
     boolParameter(111, "encoder.missing_pulse_detection", "缺脉冲检测", "编码器与车轮", true),
     numericParameter(120, "motor.pwm_limit", "电机 PWM 上限", "电机与保护", "%", "u32", 92, 0, 100, 1, "限制驱动输出，修改前确认电源和机械安全", true),
     numericParameter(121, "motor.current_limit_a", "电机电流上限", "电机与保护", "A", "f32", 12, 0, 40, 0.1, "超过此阈值时触发保护", true),

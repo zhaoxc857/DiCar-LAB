@@ -2,6 +2,9 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { App } from "../app/App";
 import { AppProviders } from "../app/providers";
 import { MockBridge } from "../bridge/mockBridge";
+import { useVehicleProfileStore } from "../stores/vehicleProfileStore";
+
+beforeEach(() => useVehicleProfileStore.getState().reset());
 
 it("runs the B-to-A tuning flow with permissions, RAM truth, and commit review", async () => {
   window.history.pushState({}, "", "/live/car-01");
@@ -43,4 +46,19 @@ it("keeps Observer read-only with a textual denial reason", async () => {
   await screen.findByText("仅观察者不能修改参数");
   expect(screen.queryByRole("button", { name: "写入 RAM" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "审阅并固化" })).toBeDisabled();
+});
+
+it("organizes the simulator as a vehicle speed-control workspace", async () => {
+  useVehicleProfileStore.getState().selectProfile("dicar-diff-drive");
+  window.history.pushState({}, "", "/live/car-01");
+  render(<AppProviders bridge={new MockBridge()}><App /></AppProviders>);
+  await act(async () => undefined);
+  fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
+  await screen.findByText("已就绪");
+  fireEvent.click(screen.getByRole("button", { name: "速度环" }));
+  expect(screen.getByText("目标", { exact: true })).toBeInTheDocument();
+  expect(screen.getByLabelText("速度环 Kp")).toBeInTheDocument();
+  expect(screen.getByText(/设备清单未提供可写目标参数/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "全部参数" }));
+  expect(screen.getByRole("heading", { name: "参数目录" })).toBeInTheDocument();
 });
