@@ -31,6 +31,24 @@ class ChannelBuffer {
     const physical = (this.start + index) % this.capacity;
     return { channelId: this.channelId, timestampUs: this.timestamps[physical], sampleSequence: this.sequences[physical], value: valueOf(this.kind, this.values[physical]) };
   }
+
+  indexAtOrNearest(timestampUs: number): number | undefined {
+    if (this.count === 0) return undefined;
+    let low = 0;
+    let high = this.count - 1;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const timestamp = this.pointAt(middle)?.timestampUs ?? timestampUs;
+      if (timestamp < timestampUs) low = middle + 1;
+      else if (timestamp > timestampUs) high = middle - 1;
+      else return middle;
+    }
+    if (low <= 0) return 0;
+    if (low >= this.count) return this.count - 1;
+    const before = this.pointAt(low - 1)?.timestampUs ?? timestampUs;
+    const after = this.pointAt(low)?.timestampUs ?? timestampUs;
+    return timestampUs - before <= after - timestampUs ? low - 1 : low;
+  }
 }
 
 export class TelemetryRingBuffer {
@@ -66,6 +84,12 @@ export class TelemetryRingBuffer {
   first(channelId: number): TelemetryPoint | undefined { return this.#channels.get(channelId)?.pointAt(0); }
   latest(channelId: number): TelemetryPoint | undefined { const channel = this.#channels.get(channelId); return channel?.pointAt(channel.count - 1); }
   at(channelId: number, index: number): TelemetryPoint | undefined { return this.#channels.get(channelId)?.pointAt(index); }
+  indexAtOrNearest(channelId: number, timestampUs: number): number | undefined { return this.#channels.get(channelId)?.indexAtOrNearest(timestampUs); }
+  nearest(channelId: number, timestampUs: number): TelemetryPoint | undefined {
+    const channel = this.#channels.get(channelId);
+    const index = channel?.indexAtOrNearest(timestampUs);
+    return index === undefined ? undefined : channel?.pointAt(index);
+  }
 
   snapshot(channelId: number, fromTimestampUs = Number.NEGATIVE_INFINITY): TelemetryPoint[] {
     const channel = this.#channels.get(channelId);

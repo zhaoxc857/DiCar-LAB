@@ -29,6 +29,17 @@ it("keeps exact u32, flags, i32, and f32 values in preallocated channel storage"
   expect(buffer.latest(203)?.value).toEqual({ kind: "f32", value: 1.25 });
 });
 
+it("finds the nearest logical sample after the circular storage wraps", () => {
+  const buffer = new TelemetryRingBuffer(1, 3);
+  buffer.append(points(5).map((point, index) => ({ ...point, timestampUs: index * 10 })));
+
+  expect(buffer.snapshot(200).map(({ timestampUs }) => timestampUs)).toEqual([20, 30, 40]);
+  expect(buffer.indexAtOrNearest(200, 34)).toBe(1);
+  expect(buffer.nearest(200, 34)?.timestampUs).toBe(30);
+  expect(buffer.indexAtOrNearest(200, -1)).toBe(0);
+  expect(buffer.indexAtOrNearest(200, 99)).toBe(2);
+});
+
 it("bounds channels and clears deterministically", () => {
   const buffer = new TelemetryRingBuffer(2, 3);
   buffer.append([...points(2, 200), ...points(2, 201)]);
