@@ -1,4 +1,4 @@
-import { expect, test } from "playwright/test";
+import { expect, test, type Locator, type Page } from "playwright/test";
 
 test("B 菜单进入 A 工作台并完成写 RAM 与固化", async ({ page }) => {
   await page.goto("/");
@@ -63,3 +63,47 @@ test("波形 A/B 可纯键盘操作并在 200% 缩放下保留读数", async ({ 
   await region.press("Escape");
   await expect(page.getByRole("status", { name: "波形游标读数" })).not.toContainText("Δt");
 });
+
+test("车型速度环组织参数并只在确认后应用推荐波形", async ({ page }) => {
+  await page.goto("/live/car-01");
+  await page.getByLabel("车型配置", { exact: true }).selectOption("dicar-diff-drive");
+  await page.getByRole("button", { name: "连接模拟器" }).click();
+  await page.getByRole("button", { name: "速度环", exact: true }).click();
+
+  await expect(page.getByText("实际", { exact: true })).toBeVisible();
+  await expect(page.getByText("误差", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("速度环 Kp")).toBeVisible();
+  await expect(page.getByText("5/8 通道", { exact: true })).toBeVisible();
+  await expect(page.getByText(/设备清单未提供可写目标参数/)).toBeVisible();
+  await expect(page.getByText("5/8 通道", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "应用 500 Hz 订阅" }).click();
+  await expect(page.getByText("5/8 通道", { exact: true })).toBeVisible();
+});
+
+test("车型任务在窄窗口中仍保持核心入口可达", async ({ page }) => {
+  await page.setViewportSize({ width: 640, height: 360 });
+  await page.goto("/live/car-01");
+  await page.getByLabel("车型配置", { exact: true }).selectOption("dicar-diff-drive");
+  await page.getByRole("button", { name: "连接模拟器" }).click();
+  const selector = page.getByLabel("车型配置", { exact: true });
+  const speedTask = page.getByRole("button", { name: "速度环", exact: true });
+  await selector.focus();
+  await tabTo(page, speedTask);
+  await page.keyboard.press("Enter");
+  await tabTo(page, page.getByLabel("速度环 Kp"));
+  await expect(page.getByLabel("速度环 Kp")).toBeFocused();
+  await expect(page.getByRole("heading", { name: "实时波形" })).toBeVisible();
+  await expect(page.getByRole("table")).toBeVisible();
+  await tabTo(page, page.getByRole("region", { name: "实时波形交互区" }));
+  await expect(page.getByRole("region", { name: "实时波形交互区" })).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});
+
+async function tabTo(page: Page, target: Locator, maxTabs = 48): Promise<void> {
+  for (let index = 0; index < maxTabs; index += 1) {
+    await page.keyboard.press("Tab");
+    if (await target.evaluate((element) => element === document.activeElement).catch(() => false)) return;
+  }
+  throw new Error(`键盘 Tab 未在 ${maxTabs} 步内到达目标控件`);
+}

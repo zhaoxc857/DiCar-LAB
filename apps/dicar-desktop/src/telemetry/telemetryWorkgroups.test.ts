@@ -1,5 +1,5 @@
 import type { TelemetryDescriptor } from "../domain/types";
-import { buildTelemetryWorkgroups, clipWorkgroup, mergeTelemetryWorkgroups } from "./telemetryWorkgroups";
+import { buildTelemetryWorkgroups, clipWorkgroup, mergeTelemetryWorkgroups, namespaceProfileWorkgroups } from "./telemetryWorkgroups";
 
 const descriptors: TelemetryDescriptor[] = [
   descriptor(20, "motor.left_rpm", "左轮转速", "rpm"),
@@ -18,6 +18,10 @@ it("derives non-empty semantic workgroups in Manifest order and allows overlap",
     { id: "power", label: "电源", channelIds: [40] },
     { id: "all", label: "全部通道", channelIds: [20, 10, 30, 40, 50] },
   ]);
+});
+
+it("namespaces valid profile preset ids away from automatic ids", () => {
+  expect(namespaceProfileWorkgroups([{ id: "speed", label: "车型速度", channelIds: [20] }])).toEqual([{ id: "profile:speed", label: "车型速度", channelIds: [20] }]);
 });
 
 it("omits empty semantic groups but keeps All Channels for an unclassified Manifest", () => {

@@ -60,6 +60,29 @@ it("organizes the simulator as a vehicle speed-control workspace", async () => {
   expect(screen.getByLabelText("速度环 Kp")).toBeInTheDocument();
   expect(screen.getByText(/设备清单未提供可写目标参数/)).toBeInTheDocument();
   expect(screen.getByText("5/8 通道")).toBeInTheDocument();
+  const focusedProfile = `schema_version: 1
+vehicle: { id: focused-car, display_name: 聚焦车型, type: 测试, order: 50 }
+control_loops:
+  - id: speed
+    label: 速度环
+    gains: { Kp: pid.kp }
+    recommended_channels: [drive.speed_mps]
+`;
+  act(() => {
+    expect(useVehicleProfileStore.getState().importProfile(focusedProfile, false).status).toBe("imported");
+    useVehicleProfileStore.getState().selectProfile("focused-car");
+  });
+  await waitFor(() => expect(screen.getByText("1/8 通道")).toBeInTheDocument());
   fireEvent.click(screen.getByRole("button", { name: "全部参数" }));
   expect(screen.getByRole("heading", { name: "参数目录" })).toBeInTheDocument();
+});
+
+it("falls back to the generic workspace for an empty incompatible profile", async () => {
+  useVehicleProfileStore.getState().importProfile("schema_version: 1\nvehicle: { id: empty-car, display_name: 空车型, type: 测试, order: 50 }\n", false);
+  useVehicleProfileStore.getState().selectProfile("empty-car");
+  window.history.pushState({}, "", "/live/car-01");
+  render(<AppProviders bridge={new MockBridge()}><App /></AppProviders>);
+  await act(async () => undefined);
+  expect(screen.getAllByText(/通用 Manifest/).length).toBeGreaterThan(0);
+  expect(screen.getByRole("button", { name: "全部参数" })).toBeInTheDocument();
 });

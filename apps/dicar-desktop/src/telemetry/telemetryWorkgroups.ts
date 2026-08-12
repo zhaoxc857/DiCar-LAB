@@ -34,6 +34,10 @@ export function clipWorkgroup(group: TelemetryWorkgroup, maxChannels: number): {
   };
 }
 
+export function namespaceProfileWorkgroups(groups: readonly TelemetryWorkgroup[]): TelemetryWorkgroup[] {
+  return groups.map((group) => ({ ...group, id: `profile:${group.id}` }));
+}
+
 export function mergeTelemetryWorkgroups(profileGroups: readonly TelemetryWorkgroup[], automaticGroups: readonly TelemetryWorkgroup[], knownChannelIds: readonly number[]): TelemetryWorkgroup[] {
   const known = new Set(knownChannelIds);
   const ids = new Set<string>();

@@ -14,7 +14,7 @@ const idPattern = /^[a-z0-9][a-z0-9_-]*$/;
 const topLevelKeys = new Set(["schema_version", "vehicle", "control_loops", "parameter_sections", "scope_presets", "metadata"]);
 
 export function parseVehicleProfile(text: string): VehicleProfileV1 {
-  if (text.length > MAX_TEXT_LENGTH) throw new VehicleProfileParseError("", "车型配置不能超过 256 KiB");
+  if (new TextEncoder().encode(text).byteLength > MAX_TEXT_LENGTH) throw new VehicleProfileParseError("", "车型配置不能超过 256 KiB");
   const document = parseDocument(text, { uniqueKeys: true });
   if (document.errors.length > 0) throw new VehicleProfileParseError("YAML", document.errors[0].message);
   validateYamlGraph(document);
@@ -41,6 +41,7 @@ function validateYamlGraph(document: ReturnType<typeof parseDocument>): void {
     Alias: () => fail("YAML", "YAML 别名不受支持"),
     Node: (_key, node) => {
       if ("anchor" in node && node.anchor) fail("YAML", "YAML 锚点不受支持");
+      if ("tag" in node && node.tag) fail("YAML", "YAML 标签不受支持");
     },
   });
 }

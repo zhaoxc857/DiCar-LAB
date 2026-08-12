@@ -17,6 +17,7 @@ flowchart LR
 主要边界：
 
 - React 只消费快照和桥接事件，不直接打开串口或构造 DCTP 帧。
+- 车辆 YAML 只把 Manifest 的精确 `machine_name` 解析成任务；resolver 输出稳定的 `paramId`/`channelId`，不修改设备 DTO。
 - Tauri 层负责类型化命令、事件转发、串口发现和内置模拟器生命周期。
 - `dicar-app-core` 负责单线程 AppActor、会话、权限策略、参数工作区、链路预算和遥测缓冲。
 - `dctp-protocol` 只负责 DCTP v1 编解码和 payload 模型，不执行 IO。
@@ -42,6 +43,31 @@ release/                 当前 Windows 发布文件（主工作区）
 ```
 
 前端通过 `DesktopBridge` 抽象选择 Tauri、Web Serial 或 Mock 实现。纯 Web 预览的真实 DCTP 会话尚未完成，不能把浏览器授权端口误报为已连接设备。
+
+### 车辆配置 schema v1
+
+内置配置放在 `apps/dicar-desktop/src/vehicleProfiles/builtins/`，由 Vite 作为 raw text 打包并在模块初始化时严格解析。最小完整示例：
+
+```yaml
+schema_version: 1
+vehicle: { id: my-diff-car, display_name: 我的差速车, type: 双轮差速, order: 50 }
+control_loops:
+  - id: speed
+    label: 速度环
+    gains: { Kp: pid.kp }
+    telemetry:
+      target: drive.target_speed_mps
+      feedback: drive.speed_mps
+      error: drive.speed_error_mps
+      outputs: [motor.left_pwm, motor.right_pwm]
+    recommended_channels: [drive.target_speed_mps, drive.speed_mps, drive.speed_error_mps]
+parameter_sections:
+  - { id: encoder, label: 编码器, parameters: [encoder.left.ppr, encoder.right.ppr] }
+scope_presets:
+  - { id: drive, label: 驱动总览, channels: [drive.speed_mps, motor.left_pwm, motor.right_pwm] }
+```
+
+约束：ID 仅允许小写 ASCII、数字、`-`、`_`；拒绝 YAML 锚点、别名和 merge key；未知字段报错；每类最多 32 项、每项最多 64 个引用。单文件 256 KiB，用户配置最多 16 个且总计 2 MiB。绑定区分大小写且不使用显示名称。解析问题为导入失败；Manifest 兼容问题按 error/warning 记录并保留有效任务，所有参数始终可从通用工作区访问。
 
 ## 3. 开发环境
 
@@ -131,7 +157,7 @@ pnpm build
 pnpm test:e2e
 ```
 
-覆盖范围包括 bridge 合同、连接栏、参数编辑、编码器、波形、权限、首页到工作台流程和 HC-05 说明。
+覆盖范围包括 bridge 合同、车辆 YAML 安全边界、Manifest 兼容解析、配置持久化、任务工作区、连接栏、参数编辑、编码器、波形、权限、首页到工作台流程和 HC-05 说明。
 
 ### Rust workspace
 

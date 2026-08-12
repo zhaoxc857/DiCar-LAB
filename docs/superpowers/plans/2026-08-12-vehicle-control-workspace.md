@@ -57,7 +57,7 @@
 - Produces `parseVehicleProfile(text: string): VehicleProfileV1`.
 - `VehicleProfileParseError` exposes a stable Chinese `message` and `path` but never includes the full imported file.
 
-- [ ] **Step 1: Add the explicit YAML dependency and Vite raw-asset typing**
+- [x] **Step 1: Add the explicit YAML dependency and Vite raw-asset typing**
 
 Run:
 
@@ -67,7 +67,7 @@ pnpm --filter @dicar/desktop add yaml@^2.8.1
 
 Then add `"vite/client"` to `compilerOptions.types` in `tsconfig.app.json`. Do not rely on the transitive lockfile entry.
 
-- [ ] **Step 2: Write literal failing parser tests**
+- [x] **Step 2: Write literal failing parser tests**
 
 Create tests whose expectations are hand-written rather than derived from parser helpers:
 
@@ -104,17 +104,17 @@ it("rejects text above 256 KiB before parsing it", () => {
 
 Also cover illegal IDs, duplicate references, more than 32 loops and a 65-channel preset. The production changes caught are missing bounds, wrong path reporting, and unsafe YAML graph features.
 
-- [ ] **Step 3: Run RED and confirm the missing parser failure**
+- [x] **Step 3: Run RED and confirm the missing parser failure**
 
 Run: `pnpm --filter @dicar/desktop test -- src/vehicleProfiles/parser.test.ts --run`
 
 Expected: FAIL because `parser.ts`/exports do not exist, not because a fixture has invalid TypeScript.
 
-- [ ] **Step 4: Implement the minimum safe parser**
+- [x] **Step 4: Implement the minimum safe parser**
 
 Use `parseDocument(text, { uniqueKeys: true, maxAliasCount: 0 })`, traverse the parsed document to reject nodes with `anchor`, aliases and `<<`, then map only known schema fields into camelCase typed values. Reject unknown top-level keys so a misspelled `control_loop` cannot silently disappear; allow unknown future fields only inside a documented `metadata` object. Implement reusable `expectObject`, `expectString`, `expectArray`, `expectId`, `uniqueIds`, and `uniqueReferences` helpers with exact path arguments.
 
-- [ ] **Step 5: Run GREEN and static gates**
+- [x] **Step 5: Run GREEN and static gates**
 
 Run:
 
@@ -126,7 +126,7 @@ pnpm --filter @dicar/desktop typecheck
 
 Expected: parser tests pass; lint/typecheck exit 0 without suppressions.
 
-- [ ] **Step 6: Commit the parser slice**
+- [x] **Step 6: Commit the parser slice**
 
 ```powershell
 git add apps/dicar-desktop/package.json pnpm-lock.yaml apps/dicar-desktop/tsconfig.app.json apps/dicar-desktop/src/vehicleProfiles
@@ -147,7 +147,7 @@ git commit -m "feat(app): parse bounded vehicle profiles"
 - Produces `resolveVehicleWorkspace(profile, parameters, telemetry): ResolvedVehicleWorkspace`.
 - Produces `genericVehicleWorkspace(parameters, telemetry): ResolvedVehicleWorkspace` with profile ID `generic-manifest`.
 
-- [ ] **Step 1: Write failing resolver tests with independent DTO fixtures**
+- [x] **Step 1: Write failing resolver tests with independent DTO fixtures**
 
 ```ts
 it("binds exact parameter and telemetry machine names to stable numeric IDs", () => {
@@ -177,17 +177,17 @@ it("drops missing recommendations, keeps valid roles, and falls back only when n
 
 Cover wrong parameter kind for gain, a telemetry name used as a parameter, section omissions, preset ordering/de-duplication, and all unreferenced parameters remaining available through the generic task.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `pnpm --filter @dicar/desktop test -- src/vehicleProfiles/resolver.test.ts --run`
 
 Expected: FAIL for missing resolver exports.
 
-- [ ] **Step 3: Implement indexed exact binding**
+- [x] **Step 3: Implement indexed exact binding**
 
 Build one `Map` for parameter machine names and one for telemetry machine names per resolve. Never scan by display label and never mutate the DTOs. Treat `f32`, `i32`, `u32`, and `enum` as numeric for gain display, but require target parameters to be writable and non-boolean before enabling writes. Preserve valid partial loops and emit deterministic issues in schema order.
 
-- [ ] **Step 4: Run GREEN and mutation checks**
+- [x] **Step 4: Run GREEN and mutation checks**
 
 Run the focused tests, then temporarily verify that changing exact match to case-insensitive makes the case-mismatch test fail; restore exact matching and rerun:
 
@@ -196,7 +196,7 @@ pnpm --filter @dicar/desktop test -- src/vehicleProfiles/resolver.test.ts --run
 pnpm --filter @dicar/desktop typecheck
 ```
 
-- [ ] **Step 5: Commit resolver behavior**
+- [x] **Step 5: Commit resolver behavior**
 
 ```powershell
 git add apps/dicar-desktop/src/vehicleProfiles
@@ -219,7 +219,7 @@ git commit -m "feat(app): resolve vehicle profiles against manifests"
 - Store state: `{ selectedProfileId; userProfiles; importProfile(yamlText, replaceExisting): ImportProfileResult; removeUserProfile(id); selectProfile(id); reset() }`.
 - `ImportProfileResult` is a tagged result: `imported`, `needsReplace`, or `failed`, with Chinese message and no thrown UI exception.
 
-- [ ] **Step 1: Write RED tests for catalog/store contracts**
+- [x] **Step 1: Write RED tests for catalog/store contracts**
 
 ```ts
 it("packages a built-in profile that resolves useful simulator tasks", () => {
@@ -244,19 +244,19 @@ it("removing the active user profile falls back to generic", () => {
 
 Also test 16-profile/2-MiB limits and migration of legacy persisted `vehicleId: "car-01"` to `generic-manifest` without changing serial settings.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `pnpm --filter @dicar/desktop test -- src/stores/vehicleProfileStore.test.ts --run`
 
 Expected: FAIL because catalog/store do not exist.
 
-- [ ] **Step 3: Add the real built-in YAML and store**
+- [x] **Step 3: Add the real built-in YAML and store**
 
 The YAML must target real simulator names (`pid.kp`, `drive.speed_mps`, `drive.target_speed_mps`, `drive.speed_error_mps`, `motor.left_pwm`, `motor.right_pwm`, encoder names, and `drive.wheel_diameter_mm`). Import it with Vite `?raw`, parse it using Task 1, and fail module initialization loudly if an in-repo built-in is invalid. Persist only selected ID and user YAML text; reparse persisted text and discard malformed entries with a recoverable catalog issue.
 
 Replace the obsolete `settingsStore.vehicleId` with profile-store selection. Keep serial hardware fields untouched.
 
-- [ ] **Step 4: Run GREEN, then all store and parser/resolver tests**
+- [x] **Step 4: Run GREEN, then all store and parser/resolver tests**
 
 ```powershell
 pnpm --filter @dicar/desktop test -- src/stores/vehicleProfileStore.test.ts src/vehicleProfiles --run
@@ -264,7 +264,7 @@ pnpm --filter @dicar/desktop lint
 pnpm --filter @dicar/desktop typecheck
 ```
 
-- [ ] **Step 5: Commit profile persistence**
+- [x] **Step 5: Commit profile persistence**
 
 ```powershell
 git add apps/dicar-desktop/src/vehicleProfiles apps/dicar-desktop/src/stores apps/dicar-desktop/tsconfig.app.json
@@ -290,7 +290,7 @@ git commit -m "feat(app): persist vehicle profile catalog"
 - `WorkspaceNav` receives resolved workspace, all parameters, selected task, and `onSelectTask`.
 - `ControlLoopWorkspace` receives one `ResolvedControlLoop`, parameter records, telemetry descriptors, and the shared ring buffer.
 
-- [ ] **Step 1: Write failing manager and workbench tests**
+- [x] **Step 1: Write failing manager and workbench tests**
 
 ```tsx
 it("imports a profile through the real file input and requires confirmation before replacement", async () => {
@@ -325,19 +325,19 @@ it("keeps all parameters reachable when a selected profile is partially incompat
 
 The tests must use the real `MockBridge`, stores and components. Only spy on a Bridge method when validating a device-side call; never replace the workspace with a mock component.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `pnpm --filter @dicar/desktop test -- src/components/vehicleProfiles src/components/workbench/ControlLoopWorkspace.test.tsx src/pages/LiveWorkbenchPage.test.tsx --run`
 
 Expected: FAIL for missing manager/nav/loop UI and old placeholder switcher.
 
-- [ ] **Step 3: Implement the minimal accessible UI**
+- [x] **Step 3: Implement the minimal accessible UI**
 
 Use Radix Dialog for management. The top selector labels itself “车型配置”, always includes “通用 Manifest”, and orders profiles by `order` then display name. Show source and compatibility issue counts in the manager. Use semantic buttons in `WorkspaceNav`; preserve the existing search/modified-only `ParameterNav` behavior under group/all tasks rather than removing it.
 
 `ControlLoopWorkspace` renders role cards from buffer latest points and reuses `TypedParameterControl` for every resolved target/gain record. It never calculates a wider range or sends automatically. Reuse `EncoderCalibrationPanel` only when a resolved section includes all three required encoder baseline names; otherwise use ordinary typed controls plus compatibility text.
 
-- [ ] **Step 4: Run GREEN and existing parameter regressions**
+- [x] **Step 4: Run GREEN and existing parameter regressions**
 
 ```powershell
 pnpm --filter @dicar/desktop test -- src/components/vehicleProfiles src/components/workbench src/pages/LiveWorkbenchPage.test.tsx --run
@@ -345,7 +345,7 @@ pnpm --filter @dicar/desktop lint
 pnpm --filter @dicar/desktop typecheck
 ```
 
-- [ ] **Step 5: Commit workspace UI**
+- [x] **Step 5: Commit workspace UI**
 
 ```powershell
 git add apps/dicar-desktop/src/components apps/dicar-desktop/src/pages/LiveWorkbenchPage.tsx apps/dicar-desktop/src/pages/LiveWorkbenchPage.test.tsx
@@ -367,7 +367,7 @@ git commit -m "feat(app): add manifest-safe control workspaces"
 - `WaveformPanel` gains optional `selectionRequest?: WaveformSelectionRequest | null` and `profileWorkgroups?: TelemetryWorkgroup[]` props.
 - Produces `mergeTelemetryWorkgroups(profileGroups, automaticGroups): TelemetryWorkgroup[]`, rejecting duplicate IDs and de-duplicating missing channel IDs against the current descriptor set at the component boundary.
 
-- [ ] **Step 1: Write failing one-shot behavior tests**
+- [x] **Step 1: Write failing one-shot behavior tests**
 
 ```tsx
 it("applies each external request once and does not overwrite later manual channel choices", async () => {
@@ -392,19 +392,19 @@ it("clips a loop recommendation to the active link budget without subscribing", 
 
 Also test profile presets before automatic groups, ID collisions, and a request whose channels all disappeared after Manifest change.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `pnpm --filter @dicar/desktop test -- src/telemetry/telemetryWorkgroups.test.ts src/components/workbench/WaveformPanel.test.tsx src/pages/LiveWorkbenchPage.test.tsx --run`
 
 Expected: FAIL because the props/request effect and merge function are absent.
 
-- [ ] **Step 3: Implement request consumption without feedback loops**
+- [x] **Step 3: Implement request consumption without feedback loops**
 
 Track `lastConsumedRequestId` in a ref. When a new request arrives, filter to current descriptor IDs, preserve request order, clip through the existing max-channel path, leave fixed Y mode, and update pending channels. Do not include `selectedIds` in an effect that can replay the same request. Manual selection remains `custom` until a newer request or explicit toolbar workgroup selection.
 
 `LiveWorkbenchPage` increments the request ID only in the task-selection event handler. Resolving a new AppSnapshot does not generate a request unless the previously selected task becomes invalid and the page must select a new task.
 
-- [ ] **Step 4: Run GREEN and telemetry capacity regressions**
+- [x] **Step 4: Run GREEN and telemetry capacity regressions**
 
 ```powershell
 pnpm --filter @dicar/desktop test -- src/telemetry src/components/workbench/WaveformPanel.test.tsx src/stores/workspaceStore.test.ts --run
@@ -412,7 +412,7 @@ pnpm --filter @dicar/desktop lint
 pnpm --filter @dicar/desktop typecheck
 ```
 
-- [ ] **Step 5: Commit waveform linkage**
+- [x] **Step 5: Commit waveform linkage**
 
 ```powershell
 git add apps/dicar-desktop/src/telemetry apps/dicar-desktop/src/components/workbench/WaveformPanel* apps/dicar-desktop/src/pages/LiveWorkbenchPage*
@@ -430,7 +430,7 @@ git commit -m "feat(app): link control tasks to pending waveforms"
 
 **Interfaces:** No new production API; this task validates the complete integrated App.
 
-- [ ] **Step 1: Add acceptance tests before any acceptance-only fixes**
+- [x] **Step 1: Add acceptance tests before any acceptance-only fixes**
 
 Add Playwright coverage that uses the built-in profile and the real page:
 
@@ -450,17 +450,17 @@ test("车型速度环组织参数并只在确认后应用推荐波形", async ({
 
 Add a 640x360 effective-200%-zoom assertion that the profile selector, workspace nav, one parameter action, waveform toolbar and table remain reachable without document horizontal overflow. Add keyboard navigation through profile selector -> task -> parameter -> waveform region. If these pass immediately, record that existing implementation already meets acceptance and do not manufacture a failure.
 
-- [ ] **Step 2: Run E2E and fix only observed acceptance gaps**
+- [x] **Step 2: Run E2E and fix only observed acceptance gaps**
 
 Run: `pnpm --filter @dicar/desktop test:e2e`
 
 Expected before fixes: new flow may fail on actual accessible names/layout; existing four flows must remain green. Any fix needs a focused unit or E2E assertion that would fail if reverted.
 
-- [ ] **Step 3: Document the user and contributor contracts**
+- [x] **Step 3: Document the user and contributor contracts**
 
 Document where built-ins live, the complete schema-v1 example, import/replace/remove behavior, Manifest exact-name binding, compatibility severity, size/count limits, generic fallback, and the prohibition against overriding device truth. Do not promise remote sharing, CMD, auto PID, schemes, experiments, or corner analysis.
 
-- [ ] **Step 4: Run the fresh full verification matrix**
+- [x] **Step 4: Run the fresh full verification matrix**
 
 From the worktree root with bundled Node/pnpm on PATH:
 
@@ -481,7 +481,7 @@ pnpm --filter @dicar/desktop tauri:build
 
 Expected: every command exits 0, all existing plus new tests pass, and Tauri produces the NSIS installer. Inspect the built App using the built-in profile; do not claim packaging from a Vite-only build.
 
-- [ ] **Step 5: Inspect complete scope and commit acceptance**
+- [x] **Step 5: Inspect complete scope and commit acceptance**
 
 Inspect `git diff 4c6f790..HEAD`, `git status --short`, generated bundle paths, dependency additions, placeholders, unbounded collections, forbidden arbitrary command paths, and accidental Manifest/DCTP changes. Then commit:
 

@@ -156,3 +156,14 @@ it("applies each external request once and preserves later manual choices", asyn
   expect(await screen.findByText("3/8 通道")).toBeInTheDocument();
   expect(setSubscription).not.toHaveBeenCalled();
 });
+
+it("clears stale pending channels when a refreshed recommendation has no Manifest matches", async () => {
+  const bridge = new MockBridge();
+  const descriptors = (await bridge.getSnapshot()).telemetryDescriptors;
+  const { rerender } = render(<AppProviders bridge={bridge}><WaveformPanel descriptors={descriptors} selectionRequest={{ requestId: 1, label: "速度环推荐", channelIds: [200] }} /></AppProviders>);
+  expect(await screen.findByText("1/8 通道")).toBeInTheDocument();
+  const changedManifest = descriptors.map((descriptor) => descriptor.channelId === 200 ? { ...descriptor, machineName: "reassigned.channel" } : descriptor);
+  rerender(<AppProviders bridge={bridge}><WaveformPanel descriptors={changedManifest} selectionRequest={{ requestId: 2, label: "速度环推荐", channelIds: [] }} /></AppProviders>);
+  expect(await screen.findByText("0/8 通道")).toBeInTheDocument();
+  expect(screen.getByText("速度环推荐没有可用通道")).toBeInTheDocument();
+});

@@ -51,7 +51,14 @@ export function WaveformPanel({ descriptors, selectionRequest = null, profileWor
     const known = new Set(descriptors.map(({ channelId }) => channelId));
     const available = [...new Set(selectionRequest.channelIds.filter((channelId) => known.has(channelId)))];
     const selected = available.slice(0, maxChannels);
-    if (selected.length === 0) { setError(`${selectionRequest.label}没有可用通道`); return; }
+    if (selected.length === 0) {
+      setSelectedIds([]);
+      setSelectedWorkgroup("custom");
+      setYScaleMode("local");
+      setFixedRanges({});
+      setError(`${selectionRequest.label}没有可用通道`);
+      return;
+    }
     setSelectedIds(selected);
     setSelectedWorkgroup("custom");
     setYScaleMode("local");

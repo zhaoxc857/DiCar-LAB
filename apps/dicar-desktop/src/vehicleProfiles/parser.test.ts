@@ -50,12 +50,14 @@ it.each([
   ["anchor", `${header}metadata: &common { note: x }`, "YAML 锚点"],
   ["alias", `${header}metadata: &common { note: x }\nextra: *common`, "YAML"],
   ["merge key", `${header}metadata:\n  base: &base { note: x }\n  merged: { <<: *base }`, "YAML merge key"],
+  ["custom tag", `${header}metadata: !custom { note: x }`, "YAML 标签"],
 ])("rejects %s with a useful path", (_name, text, message) => {
   expect(() => parseVehicleProfile(text)).toThrow(message);
 });
 
 it("rejects text above 256 KiB before parsing it", () => {
   expect(() => parseVehicleProfile("x".repeat(256 * 1024 + 1))).toThrow("256 KiB");
+  expect(() => parseVehicleProfile(`${header}metadata: ${"车".repeat(90_000)}`)).toThrow("256 KiB");
 });
 
 it("enforces collection and reference bounds", () => {

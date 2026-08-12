@@ -40,35 +40,40 @@ export const useVehicleProfileStore = create<VehicleProfileState>((set, get) => 
     const existingIndex = current.findIndex((entry) => entry.profile.vehicle.id === id);
     if (existingIndex >= 0 && !replaceExisting) return { status: "needsReplace", message: `车型 ${profile.profile.vehicle.displayName} 已存在，需要确认替换`, profileId: id };
     if (existingIndex < 0 && current.length >= MAX_USER_PROFILES) return { status: "failed", message: `最多保存 ${MAX_USER_PROFILES} 个用户车型配置` };
-    const next = existingIndex < 0 ? [...current, profile] : current.map((entry, index) => index === existingIndex ? profile : entry);
+    const next = sortProfiles(existingIndex < 0 ? [...current, profile] : current.map((entry, index) => index === existingIndex ? profile : entry));
     if (storedBytes(next) > MAX_STORED_BYTES) return { status: "failed", message: "用户车型配置总量不能超过 2 MiB" };
-    set({ userProfiles: sortProfiles(next) });
-    persist(get());
+    const persistenceIssue = persist({ selectedProfileId: get().selectedProfileId, userProfiles: next });
+    if (persistenceIssue) return { status: "failed", message: persistenceIssue };
+    set({ userProfiles: next, catalogIssues: [] });
     return { status: "imported", message: `已导入 ${profile.profile.vehicle.displayName}`, profileId: id };
   },
   removeUserProfile: (id) => {
     const next = get().userProfiles.filter((entry) => entry.profile.vehicle.id !== id);
     const selectedProfileId = get().selectedProfileId === id ? GENERIC_PROFILE_ID : get().selectedProfileId;
-    set({ userProfiles: next, selectedProfileId });
-    persist(get());
+    const persistenceIssue = persist({ userProfiles: next, selectedProfileId });
+    if (persistenceIssue) { set({ catalogIssues: [persistenceIssue] }); return; }
+    set({ userProfiles: next, selectedProfileId, catalogIssues: [] });
   },
   selectProfile: (id) => {
     if (!profileExists(id, get().userProfiles)) return;
-    set({ selectedProfileId: id });
-    persist(get());
+    const persistenceIssue = persist({ selectedProfileId: id, userProfiles: get().userProfiles });
+    if (persistenceIssue) { set({ catalogIssues: [persistenceIssue] }); return; }
+    set({ selectedProfileId: id, catalogIssues: [] });
   },
   reset: () => {
-    set({ selectedProfileId: GENERIC_PROFILE_ID, userProfiles: [], catalogIssues: [] });
-    persist(get());
+    const next = { selectedProfileId: GENERIC_PROFILE_ID, userProfiles: [] };
+    const persistenceIssue = persist(next);
+    if (persistenceIssue) { set({ catalogIssues: [persistenceIssue] }); return; }
+    set({ ...next, catalogIssues: [] });
   },
 }));
 
 function readPersistedProfiles(): Pick<VehicleProfileState, "selectedProfileId" | "userProfiles" | "catalogIssues"> {
   const fallback = { selectedProfileId: GENERIC_PROFILE_ID, userProfiles: [], catalogIssues: [] };
   if (typeof localStorage === "undefined") return fallback;
-  const raw = localStorage.getItem(VEHICLE_PROFILE_STORAGE_KEY);
-  if (raw === null) return fallback;
   try {
+    const raw = localStorage.getItem(VEHICLE_PROFILE_STORAGE_KEY);
+    if (raw === null) return fallback;
     const parsed = JSON.parse(raw) as Partial<PersistedProfiles>;
     const yamlTexts = Array.isArray(parsed.userYamlTexts) ? parsed.userYamlTexts.filter((value): value is string => typeof value === "string").slice(0, MAX_USER_PROFILES) : [];
     const userProfiles: StoredVehicleProfile[] = [];
@@ -98,10 +103,15 @@ function profileExists(id: string, users: StoredVehicleProfile[]): boolean {
   return id === GENERIC_PROFILE_ID || builtInProfiles.some((entry) => entry.profile.vehicle.id === id) || users.some((entry) => entry.profile.vehicle.id === id);
 }
 
-function persist(state: Pick<VehicleProfileState, "selectedProfileId" | "userProfiles">): void {
-  if (typeof localStorage === "undefined") return;
-  const value: PersistedProfiles = { selectedProfileId: state.selectedProfileId, userYamlTexts: state.userProfiles.map(({ yamlText }) => yamlText) };
-  localStorage.setItem(VEHICLE_PROFILE_STORAGE_KEY, JSON.stringify(value));
+function persist(state: Pick<VehicleProfileState, "selectedProfileId" | "userProfiles">): string | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const value: PersistedProfiles = { selectedProfileId: state.selectedProfileId, userYamlTexts: state.userProfiles.map(({ yamlText }) => yamlText) };
+    localStorage.setItem(VEHICLE_PROFILE_STORAGE_KEY, JSON.stringify(value));
+    return null;
+  } catch {
+    return "保存车型配置失败，已保留此前状态";
+  }
 }
 
 function storedBytes(profiles: StoredVehicleProfile[]): number {

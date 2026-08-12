@@ -21,5 +21,7 @@ it("shows built-in source and removes user profiles only", async () => {
   render(<VehicleProfileManager onClose={() => undefined} open />);
   expect(screen.getByText("内置", { exact: true })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "移除 用户车" }));
+  expect(screen.getByText("用户车")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "确认移除 用户车" }));
   expect(screen.queryByText("用户车")).not.toBeInTheDocument();
 });

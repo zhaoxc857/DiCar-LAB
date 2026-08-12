@@ -26,10 +26,14 @@ const simulatorTelemetryNames = [
   "drive.speed_error_mps", "motor.left_pwm", "motor.right_pwm", "encoder.right_delta",
   "control.loop_jitter_us", "power.battery_voltage", "steering.error_deg", "system.uptime_ms",
 ];
+const simulatorTelemetryTypes: TelemetryDescriptor["telemetryType"][] = [
+  "f32", "i32", "u32", "flags32", "u32", "f32", "f32", "f32",
+  "f32", "u32", "u32", "i32", "u32", "f32", "f32", "u32",
+];
 
 const telemetryDescriptors: TelemetryDescriptor[] = Array.from({ length: 16 }, (_, index) => ({
   channelId: 200 + index,
-  telemetryType: index % 4 === 0 ? "f32" : index % 4 === 1 ? "i32" : index % 4 === 2 ? "u32" : "flags32",
+  telemetryType: simulatorTelemetryTypes[index],
   machineName: simulatorTelemetryNames[index],
   displayName: `模拟通道 ${index + 1}`,
   group: "模拟遥测",
@@ -402,7 +406,7 @@ export class MockBridge implements DesktopBridge {
           channelId,
           timestampUs: this.#timestampUs,
           sampleSequence: this.#sampleSequence & 0xffff,
-          value: deterministicValue(slot, this.#sampleSequence),
+          value: deterministicValue(telemetryDescriptors.find((descriptor) => descriptor.channelId === channelId)?.telemetryType ?? "u32", slot, this.#sampleSequence),
         });
       }
       this.#sampleSequence += 1;
@@ -504,15 +508,11 @@ function sameValue(left: ParameterValue, right: ParameterValue | null): boolean 
   return right !== null && left.kind === right.kind && Object.is(left.value, right.value);
 }
 
-function deterministicValue(slot: number, sequence: number): TelemetryValue {
-  switch (slot % 4) {
-    case 0:
-      return { kind: "f32", value: sequence / 10 + slot };
-    case 1:
-      return { kind: "i32", value: sequence - slot };
-    case 2:
-      return { kind: "u32", value: sequence + slot };
-    default:
-      return { kind: "flags32", value: (sequence + slot) & 0xff };
+function deterministicValue(kind: TelemetryDescriptor["telemetryType"], slot: number, sequence: number): TelemetryValue {
+  switch (kind) {
+    case "f32": return { kind, value: sequence / 10 + slot };
+    case "i32": return { kind, value: sequence - slot };
+    case "u32": return { kind, value: sequence + slot };
+    case "flags32": return { kind, value: (sequence + slot) & 0xff };
   }
 }

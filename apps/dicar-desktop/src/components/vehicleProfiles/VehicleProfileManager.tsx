@@ -12,8 +12,10 @@ export function VehicleProfileManager({ open, onClose }: { open: boolean; onClos
   const userProfiles = useVehicleProfileStore((state) => state.userProfiles);
   const importProfile = useVehicleProfileStore((state) => state.importProfile);
   const removeUserProfile = useVehicleProfileStore((state) => state.removeUserProfile);
+  const catalogIssues = useVehicleProfileStore((state) => state.catalogIssues);
   const [result, setResult] = useState<ImportProfileResult | null>(null);
   const [pendingYaml, setPendingYaml] = useState<string | null>(null);
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
   const profiles = [...builtInProfiles, ...userProfiles].sort((a, b) => a.profile.vehicle.order - b.profile.vehicle.order || a.profile.vehicle.displayName.localeCompare(b.profile.vehicle.displayName, "zh-CN"));
 
   async function readFile(file: File | undefined) {
@@ -38,11 +40,13 @@ export function VehicleProfileManager({ open, onClose }: { open: boolean; onClos
         <div className="p-4">
           <label className="flex cursor-pointer items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed border-(--interactive) bg-[color-mix(in_srgb,var(--interactive)_6%,transparent)] p-4 text-sm text-(--interactive)"><FileArrowUp size={20} />导入车型 YAML<input accept=".yaml,.yml" aria-label="导入车型 YAML" className="sr-only" onChange={(event) => { void readFile(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} type="file" /></label>
           {result && <p aria-live="polite" className={`mb-0 mt-3 text-xs ${result.status === "failed" ? "text-(--danger)" : "text-(--success)"}`}>{result.message}</p>}
+          {catalogIssues.map((issue) => <p aria-live="polite" className="mb-0 mt-3 text-xs text-(--danger)" key={issue}>{issue}</p>)}
           {result?.status === "needsReplace" && <Button className="mt-3" onClick={replace} size="sm">确认替换 {pendingYaml ? profileName(pendingYaml) : result.profileId}</Button>}
           <div className="mt-4 space-y-2">{profiles.map((entry) => {
             const resolved = snapshot ? resolveVehicleWorkspace(entry.profile, snapshot.parameters, snapshot.telemetryDescriptors) : null;
             const issueCount = resolved?.issues.length ?? 0;
-            return <article className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-(--border) bg-(--surface) p-3" key={entry.profile.vehicle.id}><div><div className="flex items-center gap-2"><h3 className="m-0 text-sm">{entry.profile.vehicle.displayName}</h3><span className="rounded border border-(--border) px-1.5 py-0.5 text-[10px] text-(--text-muted)">{entry.source === "builtIn" ? "内置" : "用户"}</span></div><p className="m-0 mt-1 font-mono text-[10px] text-(--text-muted)">{entry.profile.vehicle.id} · {entry.profile.vehicle.type}{snapshot ? ` · ${issueCount} 条兼容性提示` : ""}</p></div>{entry.source === "user" && <Button aria-label={`移除 ${entry.profile.vehicle.displayName}`} onClick={() => removeUserProfile(entry.profile.vehicle.id)} size="sm" variant="danger"><Trash size={14} />移除</Button>}</article>;
+            const confirmingRemove = pendingRemoveId === entry.profile.vehicle.id;
+            return <article className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-(--border) bg-(--surface) p-3" key={entry.profile.vehicle.id}><div><div className="flex items-center gap-2"><h3 className="m-0 text-sm">{entry.profile.vehicle.displayName}</h3><span className="rounded border border-(--border) px-1.5 py-0.5 text-[10px] text-(--text-muted)">{entry.source === "builtIn" ? "内置" : "用户"}</span></div><p className="m-0 mt-1 font-mono text-[10px] text-(--text-muted)">{entry.profile.vehicle.id} · {entry.profile.vehicle.type}{snapshot ? ` · ${issueCount} 条兼容性提示` : ""}</p></div>{entry.source === "user" && (confirmingRemove ? <div className="flex gap-2"><Button aria-label={`取消移除 ${entry.profile.vehicle.displayName}`} onClick={() => setPendingRemoveId(null)} size="sm" variant="secondary">取消</Button><Button aria-label={`确认移除 ${entry.profile.vehicle.displayName}`} onClick={() => { removeUserProfile(entry.profile.vehicle.id); setPendingRemoveId(null); }} size="sm" variant="danger"><Trash size={14} />确认移除</Button></div> : <Button aria-label={`移除 ${entry.profile.vehicle.displayName}`} onClick={() => setPendingRemoveId(entry.profile.vehicle.id)} size="sm" variant="danger"><Trash size={14} />移除</Button>)}</article>;
           })}</div>
         </div>
       </Dialog.Content>

@@ -61,6 +61,14 @@ it("persists only selected id and YAML text", () => {
   expect(JSON.stringify(persisted)).not.toContain("schemaVersion");
 });
 
+it("keeps the previous in-memory state when persistence fails", () => {
+  const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("quota", "QuotaExceededError"); });
+  expect(useVehicleProfileStore.getState().importProfile(USER_YAML, false)).toMatchObject({ status: "failed", message: expect.stringContaining("保存") });
+  expect(useVehicleProfileStore.getState().userProfiles).toEqual([]);
+  expect(useVehicleProfileStore.getState().selectedProfileId).toBe(GENERIC_PROFILE_ID);
+  setItem.mockRestore();
+});
+
 it("migrates legacy settings without changing serial fields", async () => {
   localStorage.setItem("dicar-tune-settings", JSON.stringify({
     state: { vehicleId: "car-01", serialHardwareProfile: "hc05", serialPortName: "COM9", serialBaudRate: 115_200 },

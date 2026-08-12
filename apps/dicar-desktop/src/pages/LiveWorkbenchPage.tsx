@@ -15,6 +15,7 @@ import type { ParameterSnapshot } from "../domain/types";
 import { useConnectionStore } from "../stores/connectionStore";
 import { useVehicleProfileStore } from "../stores/vehicleProfileStore";
 import { useWorkspaceStore } from "../stores/workspaceStore";
+import { namespaceProfileWorkgroups } from "../telemetry/telemetryWorkgroups";
 import { builtInProfiles, GENERIC_PROFILE_ID } from "../vehicleProfiles/catalog";
 import { genericVehicleWorkspace, resolveVehicleWorkspace } from "../vehicleProfiles/resolver";
 
@@ -26,7 +27,13 @@ export function LiveWorkbenchPage() {
   const records = useMemo(() => snapshot?.parameters ?? [], [snapshot?.parameters]);
   const telemetry = useMemo(() => snapshot?.telemetryDescriptors ?? [], [snapshot?.telemetryDescriptors]);
   const profile = [...builtInProfiles, ...userProfiles].find((entry) => entry.profile.vehicle.id === selectedProfileId)?.profile;
-  const workspace = useMemo(() => selectedProfileId === GENERIC_PROFILE_ID || profile === undefined ? genericVehicleWorkspace(records, telemetry) : resolveVehicleWorkspace(profile, records, telemetry), [profile, records, selectedProfileId, telemetry]);
+  const workspace = useMemo(() => {
+    if (selectedProfileId === GENERIC_PROFILE_ID || profile === undefined) return genericVehicleWorkspace(records, telemetry);
+    const resolved = resolveVehicleWorkspace(profile, records, telemetry);
+    if (!resolved.fallbackRequired) return resolved;
+    const generic = genericVehicleWorkspace(records, telemetry);
+    return { ...generic, displayName: `通用 Manifest · ${profile.vehicle.displayName} 不兼容`, issues: resolved.issues };
+  }, [profile, records, selectedProfileId, telemetry]);
   const groups = useMemo(() => [...new Set(records.map(({ group }) => group))], [records]);
   const [selectedTask, setSelectedTask] = useState<WorkspaceTask>({ kind: "all", id: "all" });
   const [selectedGroup, setSelectedGroup] = useState("速度环 PID");
@@ -34,11 +41,23 @@ export function LiveWorkbenchPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [waveformRequest, setWaveformRequest] = useState<WaveformSelectionRequest | null>(null);
   const requestId = useRef(0);
+  const recommendationSignature = useRef<string | null>(null);
 
   useEffect(() => {
     const available = availableTasks(workspace);
     if (!available.some((task) => task.kind === selectedTask.kind && task.id === selectedTask.id)) setSelectedTask(available[0] ?? { kind: "all", id: "all" });
   }, [groups, selectedTask.id, selectedTask.kind, workspace]);
+
+  const selectedLoop = selectedTask.kind === "loop" ? workspace.controlLoops.find(({ id }) => id === selectedTask.id) : undefined;
+  const selectedLoopSignature = selectedLoop === undefined ? null : `${workspace.profileId}|${selectedLoop.id}|${selectedLoop.recommendedChannelIds.join(",")}|${telemetry.map(({ channelId, machineName, telemetryType }) => `${channelId}:${machineName}:${telemetryType}`).join(";")}`;
+  useEffect(() => {
+    if (selectedLoop === undefined || selectedLoopSignature === null) { recommendationSignature.current = null; return; }
+    if (recommendationSignature.current === null) { recommendationSignature.current = selectedLoopSignature; return; }
+    if (recommendationSignature.current !== selectedLoopSignature) {
+      recommendationSignature.current = selectedLoopSignature;
+      setWaveformRequest({ requestId: ++requestId.current, label: `${selectedLoop.label}推荐`, channelIds: selectedLoop.recommendedChannelIds });
+    }
+  }, [selectedLoop, selectedLoopSignature]);
 
   useEffect(() => {
     if (!groups.includes(selectedGroup) && groups[0]) setSelectedGroup(groups[0]);
@@ -52,7 +71,10 @@ export function LiveWorkbenchPage() {
     setSelectedTask(task);
     if (task.kind === "loop") {
       const loop = workspace.controlLoops.find(({ id }) => id === task.id);
-      if (loop && loop.recommendedChannelIds.length > 0) setWaveformRequest({ requestId: ++requestId.current, label: `${loop.label}推荐`, channelIds: loop.recommendedChannelIds });
+      if (loop && loop.recommendedChannelIds.length > 0) {
+        recommendationSignature.current = `${workspace.profileId}|${loop.id}|${loop.recommendedChannelIds.join(",")}|${telemetry.map(({ channelId, machineName, telemetryType }) => `${channelId}:${machineName}:${telemetryType}`).join(";")}`;
+        setWaveformRequest({ requestId: ++requestId.current, label: `${loop.label}推荐`, channelIds: loop.recommendedChannelIds });
+      }
     } else if (task.kind === "section") {
       const preset = workspace.scopePresets.find(({ id }) => id === task.id);
       if (preset) setWaveformRequest({ requestId: ++requestId.current, label: preset.label, channelIds: preset.channelIds });
@@ -67,7 +89,7 @@ export function LiveWorkbenchPage() {
     <div className="mt-3 grid min-h-[560px] gap-3 xl:grid-cols-[264px_minmax(420px,1fr)_minmax(440px,1.15fr)]">
       <div className="space-y-3"><WorkspaceNav onSelectTask={chooseTask} records={records} selectedTask={selectedTask} workspace={workspace} />{(selectedTask.kind === "all" || selectedTask.kind === "group") && <ParameterNav onSelectGroup={chooseGroup} onSelectParameter={setSelectedParamId} records={selectedTask.kind === "group" ? records.filter((record) => record.group === selectedTask.id) : records} selectedGroup={selectedGroup} selectedParamId={selectedParamId} />}</div>
       <TaskEditor buffer={buffer} records={records} selectedGroup={selectedGroup} selectedRecord={selectedRecord} task={selectedTask} telemetry={telemetry} workspace={workspace} />
-      <WaveformPanel descriptors={telemetry} profileWorkgroups={workspace.profileId === GENERIC_PROFILE_ID ? [] : workspace.scopePresets} selectionRequest={waveformRequest} />
+      <WaveformPanel descriptors={telemetry} profileWorkgroups={workspace.profileId === GENERIC_PROFILE_ID ? [] : namespaceProfileWorkgroups(workspace.scopePresets)} selectionRequest={waveformRequest} />
     </div>
     <ChangeBar dirtyCount={dirty.length} onReview={() => setReviewOpen(true)} />
     <CommitReviewDialog onClose={() => setReviewOpen(false)} open={reviewOpen} records={dirty} />
