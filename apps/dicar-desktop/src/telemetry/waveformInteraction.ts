@@ -28,6 +28,25 @@ export function clickCursor(state: WaveformCursorState, timestampUs: number): Wa
   return { cursorAUs: timestampUs, cursorBUs: null, activeCursor: "A" };
 }
 
+export function clampCursorsToBounds(
+  state: WaveformCursorState,
+  firstUs: number,
+  latestUs: number,
+): { state: WaveformCursorState; clamped: ActiveCursor[] } {
+  if (latestUs < firstUs) return { state, clamped: [] };
+  const clamped: ActiveCursor[] = [];
+  const cursorAUs = clampCursor("A", state.cursorAUs);
+  const cursorBUs = clampCursor("B", state.cursorBUs);
+  if (clamped.length === 0) return { state, clamped };
+  return { state: { ...state, cursorAUs, cursorBUs }, clamped };
+
+  function clampCursor(cursor: ActiveCursor, timestampUs: number | null): number | null {
+    if (timestampUs === null || (timestampUs >= firstUs && timestampUs <= latestUs)) return timestampUs;
+    clamped.push(cursor);
+    return clamp(timestampUs, firstUs, latestUs);
+  }
+}
+
 export function advanceCursor(
   buffer: TelemetryRingBuffer,
   channelId: number,

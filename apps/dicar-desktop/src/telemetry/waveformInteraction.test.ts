@@ -2,6 +2,7 @@ import type { TelemetryPoint } from "../domain/types";
 import { TelemetryRingBuffer } from "./ringBuffer";
 import {
   advanceCursor,
+  clampCursorsToBounds,
   clickCursor,
   computeChannelRange,
   nearestReading,
@@ -50,6 +51,14 @@ it("computes padded finite ranges for constant and varying channel values", () =
   expect(computeChannelRange([5, 5, Number.NaN])).toEqual({ min: 4, max: 6 });
   expect(computeChannelRange([-10, 30, Number.POSITIVE_INFINITY])).toEqual({ min: -14.8, max: 34.8 });
   expect(computeChannelRange([Number.NaN])).toBeNull();
+});
+
+it("clamps only locked cursors that have rolled outside the retained timestamp bounds", () => {
+  expect(clampCursorsToBounds({ cursorAUs: 50, cursorBUs: 500, activeCursor: "B" }, 100, 400)).toEqual({
+    state: { cursorAUs: 100, cursorBUs: 400, activeCursor: "B" },
+    clamped: ["A", "B"],
+  });
+  expect(clampCursorsToBounds(empty, 100, 400)).toEqual({ state: empty, clamped: [] });
 });
 
 function sampleBuffer(timestamps: number[]): TelemetryRingBuffer {

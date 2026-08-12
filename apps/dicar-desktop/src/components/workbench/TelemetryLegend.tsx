@@ -13,5 +13,6 @@ export function TelemetryLegend({ descriptors, selectedIds, buffer, targetTimest
 }
 
 export function formatTelemetry(value: number): string {
+  if (!Number.isFinite(value)) return "无效样本";
   return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
 }

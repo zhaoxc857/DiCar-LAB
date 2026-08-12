@@ -4,7 +4,7 @@ import type { TelemetryDescriptor } from "../../domain/types";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { buildTelemetryWorkgroups, clipWorkgroup } from "../../telemetry/telemetryWorkgroups";
-import { advanceCursor, clickCursor, computeChannelRange, type ChannelRange, type WaveformCursorState, type YScaleMode } from "../../telemetry/waveformInteraction";
+import { advanceCursor, clampCursorsToBounds, clickCursor, computeChannelRange, type ChannelRange, type WaveformCursorState, type YScaleMode } from "../../telemetry/waveformInteraction";
 import { TelemetryDataTable } from "./TelemetryDataTable";
 import { TelemetryLegend } from "./TelemetryLegend";
 import { TelemetryToolbar } from "./TelemetryToolbar";
@@ -24,6 +24,7 @@ export function WaveformPanel({ descriptors }: { descriptors: TelemetryDescripto
   const [yScaleMode, setYScaleMode] = useState<YScaleMode>("local");
   const [fixedRanges, setFixedRanges] = useState<Record<number, ChannelRange>>({});
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const paused = snapshot?.paused ?? false;
   const maxChannels = snapshot?.linkBudget?.maxChannels ?? 8;
   const maxSampleRateHz = snapshot?.linkBudget?.maxSampleRateHz ?? 500;
@@ -41,18 +42,37 @@ export function WaveformPanel({ descriptors }: { descriptors: TelemetryDescripto
     });
   }, [descriptors, maxChannels]);
   useEffect(() => { setSampleRateHz((current) => Math.min(current, maxSampleRateHz)); }, [maxSampleRateHz]);
+  useEffect(() => {
+    const firstTimestamps = selectedIds.map((channelId) => buffer.first(channelId)?.timestampUs).filter((timestampUs): timestampUs is number => timestampUs !== undefined);
+    const latestTimestamps = selectedIds.map((channelId) => buffer.latest(channelId)?.timestampUs).filter((timestampUs): timestampUs is number => timestampUs !== undefined);
+    if (firstTimestamps.length === 0 || latestTimestamps.length === 0) return;
+    const firstUs = Math.min(...firstTimestamps);
+    const latestUs = Math.max(...latestTimestamps);
+    const rolledBeforeStart = (cursors.cursorAUs !== null && cursors.cursorAUs < firstUs) || (cursors.cursorBUs !== null && cursors.cursorBUs < firstUs);
+    const result = clampCursorsToBounds(cursors, firstUs, latestUs);
+    if (result.clamped.length === 0) return;
+    setCursors(result.state);
+    setNotice(rolledBeforeStart ? "游标数据已滚出缓冲，已移至最早样本" : "游标超出有效数据，已移至最新样本");
+  }, [buffer, cursors, selectedIds, visualRevision]);
+
+  function leaveFixedScale() {
+    setYScaleMode("local");
+    setFixedRanges({});
+  }
 
   function toggleChannel(channelId: number) {
     setError(null);
     setSelectedWorkgroup("custom");
-    if (selectedIds.includes(channelId)) { if (selectedIds.length === 1) { setError("至少保留 1 个通道"); return; } setSelectedIds((ids) => ids.filter((id) => id !== channelId)); return; }
+    if (selectedIds.includes(channelId)) { if (selectedIds.length === 1) { setError("至少保留 1 个通道"); return; } leaveFixedScale(); setSelectedIds((ids) => ids.filter((id) => id !== channelId)); return; }
     if (selectedIds.length >= maxChannels) { setError(maxChannels === 8 ? "最多同时显示 8 个通道" : `当前链路最多同时显示 ${maxChannels} 个通道`); return; }
+    leaveFixedScale();
     setSelectedIds((ids) => [...ids, channelId]);
   }
   function selectWorkgroup(id: string) {
     const group = workgroups.find((item) => item.id === id);
     if (!group) return;
     const clipped = clipWorkgroup(group, maxChannels);
+    leaveFixedScale();
     setSelectedIds(clipped.channelIds);
     setSelectedWorkgroup(id);
     setError(clipped.omittedCount > 0 ? `当前链路已保留 ${clipped.channelIds.length} 个通道，省略 ${clipped.omittedCount} 个` : null);
@@ -60,8 +80,8 @@ export function WaveformPanel({ descriptors }: { descriptors: TelemetryDescripto
   async function applySubscription() { const result = await bridge.setTelemetrySubscription({ channelIds: selectedIds, sampleRateHz }); if (result.status === "failed") setError(result.message); else setError(null); }
   async function togglePause() { const result = await bridge.setPaused(!paused); if (result.status === "failed") setError(result.message); }
   async function addMarker() { const active = cursors.activeCursor === "B" ? cursors.cursorBUs : cursors.cursorAUs; const timestampUs = active ?? probeTimestampUs ?? (selectedIds[0] === undefined ? undefined : buffer.latest(selectedIds[0])?.timestampUs); if (timestampUs === undefined || timestampUs === null) { setError("尚无可标记的遥测时刻"); return; } const result = await bridge.addMarker(`T+${Math.round(timestampUs)} µs`); if (result.status === "failed") setError(result.message); }
-  function lockCursor(timestampUs: number) { setCursors((state) => clickCursor(state, Math.round(timestampUs))); }
-  function clearCursors() { setCursors({ cursorAUs: null, cursorBUs: null, activeCursor: "A" }); setProbeTimestampUs(null); }
+  function lockCursor(timestampUs: number) { setNotice(null); setCursors((state) => clickCursor(state, Math.round(timestampUs))); }
+  function clearCursors() { setCursors({ cursorAUs: null, cursorBUs: null, activeCursor: "A" }); setProbeTimestampUs(null); setNotice(null); }
   function changeScaleMode(mode: YScaleMode) {
     setYScaleMode(mode);
     if (mode === "fixed") resetFixedRanges();
@@ -98,6 +118,7 @@ export function WaveformPanel({ descriptors }: { descriptors: TelemetryDescripto
     <header className="flex items-start justify-between gap-3"><div><h2 className="m-0 text-sm">实时波形</h2><p className="m-0 mt-1 text-[11px] text-(--text-muted)">有界 60 秒缓冲 · 像素极值降采样 · Canvas ≤30 Hz</p></div><span className="rounded border border-(--success) px-2 py-1 text-[10px] text-(--success)">{selectedIds.length}/{maxChannels} 通道</span></header>
     <TelemetryToolbar descriptors={descriptors} error={error} hasCursors={cursors.cursorAUs !== null || cursors.cursorBUs !== null} linkReason={snapshot?.linkBudget?.reason ?? null} maxChannels={maxChannels} maxSampleRateHz={maxSampleRateHz} onApply={() => void applySubscription()} onClearCursors={clearCursors} onMarker={() => void addMarker()} onPause={() => void togglePause()} onResetFixedRanges={resetFixedRanges} onSampleRate={setSampleRateHz} onToggleChannel={toggleChannel} onWindow={setWindowSeconds} onWorkgroup={selectWorkgroup} onYScaleMode={changeScaleMode} paused={paused} sampleRateHz={sampleRateHz} selectedIds={selectedIds} selectedWorkgroup={selectedWorkgroup} windowSeconds={windowSeconds} workgroups={workgroups} yScaleMode={yScaleMode} />
     <div aria-label="实时波形交互区" className="mt-3 overflow-hidden rounded border border-(--border) bg-(--background) focus-visible:outline" onKeyDown={onKeyDown} role="region" tabIndex={0}><WaveformCanvas buffer={buffer} cursorAUs={cursors.cursorAUs} cursorBUs={cursors.cursorBUs} descriptors={selectedDescriptors} fixedRanges={fixedRanges} onLockCursor={lockCursor} onProbe={setProbeTimestampUs} paused={paused} probeTimestampUs={probeTimestampUs} selectedIds={selectedIds} visualRevision={visualRevision} windowSeconds={windowSeconds} yScaleMode={yScaleMode} /></div>
+    {notice ? <p aria-live="polite" className="m-0 mt-2 text-[10px] text-(--warning)">{notice}</p> : null}
     <TelemetryLegend buffer={buffer} descriptors={descriptors} selectedIds={selectedIds} targetTimestampUs={targetTimestampUs} />
     <TelemetryDataTable activeCursor={cursors.activeCursor} buffer={buffer} cursorAUs={cursors.cursorAUs} cursorBUs={cursors.cursorBUs} descriptors={descriptors} paused={paused} probeTimestampUs={probeTimestampUs} selectedIds={selectedIds} />
   </section>;

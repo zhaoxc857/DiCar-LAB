@@ -110,3 +110,31 @@ it("locks timestamp A and B on the canvas and retains them while paused", async 
   fireEvent.click(screen.getByRole("button", { name: "清除 A/B" }));
   expect(screen.getByRole("status", { name: "波形游标读数" })).not.toHaveTextContent(/Δt/);
 });
+
+it("exits fixed Y range when manual channel selection changes", async () => {
+  const bridge = new MockBridge();
+  const descriptors = (await bridge.getSnapshot()).telemetryDescriptors;
+  render(<AppProviders bridge={bridge}><WaveformPanel descriptors={descriptors} /></AppProviders>);
+  await act(async () => undefined);
+
+  fireEvent.change(screen.getByRole("combobox", { name: "Y 轴范围" }), { target: { value: "fixed" } });
+  expect(screen.getByRole("combobox", { name: "Y 轴范围" })).toHaveValue("fixed");
+  fireEvent.click(screen.getByRole("button", { name: "选择通道 8/8" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "模拟通道 8" }));
+  expect(screen.getByRole("combobox", { name: "Y 轴范围" })).toHaveValue("local");
+});
+
+it("moves a locked cursor to the retained boundary when its samples roll out", async () => {
+  const bridge = new MockBridge();
+  const descriptors = (await bridge.getSnapshot()).telemetryDescriptors;
+  render(<AppProviders bridge={bridge}><WaveformPanel descriptors={descriptors} /></AppProviders>);
+  await act(async () => { await bridge.connect({ kind: "simulator", address: "127.0.0.1:7100" }); });
+  const canvas = screen.getByRole("img", { name: "实时波形" });
+  vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 192, width: 400, height: 192, toJSON: () => ({}) });
+  fireEvent.click(canvas, { clientX: 200 });
+
+  await act(async () => { bridge.advanceTelemetry(30_000); });
+
+  expect(await screen.findByText("游标数据已滚出缓冲，已移至最早样本")).toBeInTheDocument();
+  expect(screen.getByRole("status", { name: "波形游标读数" })).toHaveTextContent(/游标 402000 µs/);
+});
