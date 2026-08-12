@@ -40,3 +40,26 @@ test("真实串口入口展示 HC-05 配对、传出 COM 和电平安全说明",
   await expect(page.getByText(/5V MCU 发往 HC-05 RX 时必须分压/)).toBeVisible();
   await expect(page.getByRole("option", { name: "自动探测" })).toBeAttached();
 });
+
+test("波形 A/B 可纯键盘操作并在 200% 缩放下保留读数", async ({ page }) => {
+  await page.goto("/live/car-01");
+  await page.getByRole("button", { name: "连接模拟器" }).click();
+  const region = page.getByRole("region", { name: "实时波形交互区" });
+  await region.focus();
+
+  await region.press("Enter");
+  await region.press("ArrowLeft");
+  await region.press("Enter");
+  await region.press("ArrowRight");
+  await expect(page.getByRole("status", { name: "波形游标读数" })).toContainText("Δt");
+  await expect(page.getByRole("columnheader", { name: "A" })).toBeAttached();
+  await expect(page.getByRole("columnheader", { name: "B" })).toBeAttached();
+
+  await page.setViewportSize({ width: 640, height: 360 });
+  await expect(page.getByRole("combobox", { name: "波形工作组" })).toBeVisible();
+  await expect(page.getByRole("table")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+
+  await region.press("Escape");
+  await expect(page.getByRole("status", { name: "波形游标读数" })).not.toContainText("Δt");
+});

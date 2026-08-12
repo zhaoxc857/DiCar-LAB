@@ -79,6 +79,14 @@ export function WaveformPanel({ descriptors }: { descriptors: TelemetryDescripto
 
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (event.key === " ") { event.preventDefault(); void togglePause(); }
+    else if (event.key === "Enter" && selectedIds[0] !== undefined) {
+      event.preventDefault();
+      setCursors((state) => {
+        const activeTimestamp = state.activeCursor === "B" ? state.cursorBUs : state.cursorAUs;
+        const timestampUs = activeTimestamp ?? buffer.latest(selectedIds[0])?.timestampUs;
+        return timestampUs === undefined ? state : clickCursor(state, timestampUs);
+      });
+    }
     else if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && selectedIds[0] !== undefined) { event.preventDefault(); setCursors((state) => advanceCursor(buffer, selectedIds[0], state, event.key === "ArrowLeft" ? -1 : 1, event.shiftKey ? 10 : 1)); }
     else if (event.key.toLocaleLowerCase() === "a" && cursors.cursorAUs !== null) { event.preventDefault(); setCursors((state) => ({ ...state, activeCursor: "A" })); }
     else if (event.key.toLocaleLowerCase() === "b" && cursors.cursorBUs !== null) { event.preventDefault(); setCursors((state) => ({ ...state, activeCursor: "B" })); }
