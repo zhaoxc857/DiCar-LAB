@@ -8,6 +8,7 @@ export type WaveformCursorState = {
   activeCursor: ActiveCursor;
 };
 export type ChannelRange = { min: number; max: number };
+export type YScaleMode = "local" | "global" | "fixed";
 export type NearestReading = { point: TelemetryPoint; offsetUs: number };
 
 export function timestampForX(x: number, width: number, firstUs: number, latestUs: number): number {
@@ -37,7 +38,11 @@ export function advanceCursor(
   const length = buffer.length(channelId);
   if (length === 0) return state;
   const activeTimestamp = state.activeCursor === "B" ? state.cursorBUs : state.cursorAUs;
-  const currentIndex = activeTimestamp === null ? (direction < 0 ? length - 1 : length - 2) : buffer.indexAtOrNearest(channelId, activeTimestamp) ?? length - 1;
+  if (activeTimestamp === null) {
+    const latest = buffer.latest(channelId);
+    return latest === undefined ? state : { ...state, cursorAUs: latest.timestampUs, activeCursor: "A" };
+  }
+  const currentIndex = buffer.indexAtOrNearest(channelId, activeTimestamp) ?? length - 1;
   const nextIndex = clamp(Math.round(currentIndex + direction * Math.max(1, step)), 0, length - 1);
   const timestampUs = buffer.at(channelId, nextIndex)?.timestampUs;
   if (timestampUs === undefined) return state;

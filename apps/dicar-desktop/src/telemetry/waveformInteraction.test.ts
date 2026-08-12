@@ -34,7 +34,7 @@ it("moves the active cursor by one or ten real samples and clamps at the buffer 
   expect(advanceCursor(buffer, 7, a, -1, 1).cursorAUs).toBe(400);
   expect(advanceCursor(buffer, 7, a, 1, 10).cursorAUs).toBe(1_400);
   expect(advanceCursor(buffer, 7, a, -1, 10).cursorAUs).toBe(0);
-  expect(advanceCursor(buffer, 7, empty, -1, 1).cursorAUs).toBe(1_300);
+  expect(advanceCursor(buffer, 7, empty, -1, 1).cursorAUs).toBe(1_400);
 });
 
 it("returns an independent nearest sample only within twice the observed interval", () => {

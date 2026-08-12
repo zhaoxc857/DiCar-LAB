@@ -71,3 +71,42 @@ it("supports Pause, focused Space, marker, windows, and an accessible historical
   fireEvent.keyDown(region, { key: "m" });
   await waitFor(() => expect(marker).toHaveBeenCalledWith(expect.stringMatching(/^T\+\d+ µs$/)));
 });
+
+it("changes pending channels through a semantic workgroup only after Apply", async () => {
+  const bridge = new MockBridge();
+  const descriptors = (await bridge.getSnapshot()).telemetryDescriptors.map((descriptor, index) => ({
+    ...descriptor,
+    machineName: index < 3 ? `motor.wheel_${index}_rpm` : descriptor.machineName,
+    displayName: index < 3 ? `电机转速 ${index + 1}` : descriptor.displayName,
+  }));
+  const setSubscription = vi.spyOn(bridge, "setTelemetrySubscription");
+  render(<AppProviders bridge={bridge}><WaveformPanel descriptors={descriptors} /></AppProviders>);
+
+  fireEvent.change(screen.getByRole("combobox", { name: "波形工作组" }), { target: { value: "motor" } });
+  expect(setSubscription).not.toHaveBeenCalled();
+  expect(screen.getByText("3/8 通道")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "应用 500 Hz 订阅" }));
+  await waitFor(() => expect(setSubscription).toHaveBeenCalledWith({ channelIds: [200, 201, 202], sampleRateHz: 500 }));
+
+  fireEvent.click(screen.getByRole("button", { name: "选择通道 3/8" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "模拟通道 4" }));
+  expect(screen.getByRole("combobox", { name: "波形工作组" })).toHaveValue("custom");
+});
+
+it("locks timestamp A and B on the canvas and retains them while paused", async () => {
+  const bridge = new MockBridge();
+  const descriptors = (await bridge.getSnapshot()).telemetryDescriptors;
+  render(<AppProviders bridge={bridge}><WaveformPanel descriptors={descriptors} /></AppProviders>);
+  await act(async () => { await bridge.connect({ kind: "simulator", address: "127.0.0.1:7100" }); });
+  const canvas = screen.getByRole("img", { name: "实时波形" });
+  vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 192, width: 400, height: 192, toJSON: () => ({}) });
+
+  fireEvent.click(canvas, { clientX: 100 });
+  fireEvent.click(canvas, { clientX: 300 });
+  expect(screen.getByRole("status", { name: "波形游标读数" })).toHaveTextContent(/A .*µs.*B .*µs.*Δt/s);
+
+  fireEvent.click(screen.getByRole("button", { name: "暂停波形" }));
+  await waitFor(() => expect(screen.getByRole("status", { name: "波形游标读数" })).toHaveTextContent(/Δt/));
+  fireEvent.click(screen.getByRole("button", { name: "清除 A/B" }));
+  expect(screen.getByRole("status", { name: "波形游标读数" })).not.toHaveTextContent(/Δt/);
+});

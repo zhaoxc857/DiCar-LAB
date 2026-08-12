@@ -1,4 +1,6 @@
 import type { TelemetryDescriptor } from "../../domain/types";
+import type { TelemetryWorkgroup } from "../../telemetry/telemetryWorkgroups";
+import type { YScaleMode } from "../../telemetry/waveformInteraction";
 import { useState } from "react";
 import { Button } from "../ui/button";
 import { Select } from "../ui/select";
@@ -19,6 +21,14 @@ type TelemetryToolbarProps = {
   onApply: () => void;
   onPause: () => void;
   onMarker: () => void;
+  workgroups: TelemetryWorkgroup[];
+  selectedWorkgroup: string;
+  yScaleMode: YScaleMode;
+  hasCursors: boolean;
+  onWorkgroup: (id: string) => void;
+  onYScaleMode: (mode: YScaleMode) => void;
+  onClearCursors: () => void;
+  onResetFixedRanges: () => void;
 };
 
 const windows = [1, 5, 10, 30, 60];
@@ -28,11 +38,15 @@ export function TelemetryToolbar(props: TelemetryToolbarProps) {
   const rates = [10, 25, 50, 100, 200, 500].filter((rate) => rate <= props.maxSampleRateHz);
   return <div className="mt-3 rounded-[var(--radius)] border border-(--border) bg-(--background) p-3">
     <div className="flex flex-wrap items-end gap-2">
+      <label className="min-w-32 text-[10px] text-(--text-muted)">工作组<Select aria-label="波形工作组" className="mt-1 h-8 text-xs" onChange={(event) => props.onWorkgroup(event.currentTarget.value)} value={props.selectedWorkgroup}><option value="custom">自定义</option>{props.workgroups.map((group) => <option key={group.id} value={group.id}>{group.label}</option>)}</Select></label>
       <label className="min-w-28 text-[10px] text-(--text-muted)">采样率<Select aria-label="遥测采样率" className="mt-1 h-8 text-xs" onChange={(event) => props.onSampleRate(Number(event.currentTarget.value))} value={props.sampleRateHz}>{rates.map((rate) => <option key={rate} value={rate}>{rate} Hz</option>)}</Select></label>
+      <label className="min-w-28 text-[10px] text-(--text-muted)">Y 轴<Select aria-label="Y 轴范围" className="mt-1 h-8 text-xs" onChange={(event) => props.onYScaleMode(event.currentTarget.value as YScaleMode)} value={props.yScaleMode}><option value="local">局部</option><option value="global">全范围</option><option value="fixed">固定</option></Select></label>
       <Button onClick={props.onApply} size="sm">应用 {props.sampleRateHz} Hz 订阅</Button>
       <Button onClick={props.onPause} size="sm" variant="secondary">{props.paused ? "继续波形" : "暂停波形"}</Button>
       <Button onClick={props.onMarker} size="sm" variant="secondary">添加标记 M</Button>
       <Button aria-expanded={channelsOpen} onClick={() => setChannelsOpen((open) => !open)} size="sm" variant="secondary">选择通道 {props.selectedIds.length}/{props.maxChannels}</Button>
+      <Button disabled={!props.hasCursors} onClick={props.onClearCursors} size="sm" variant="secondary">清除 A/B</Button>
+      {props.yScaleMode === "fixed" && <Button onClick={props.onResetFixedRanges} size="sm" variant="secondary">重置固定范围</Button>}
     </div>
     <div aria-label="时间窗口" className="mt-2 flex flex-wrap gap-1">{windows.map((seconds) => <button aria-pressed={props.windowSeconds === seconds} className={`rounded border px-2 py-1 text-[10px] ${props.windowSeconds === seconds ? "border-(--interactive) text-(--interactive)" : "border-(--border) text-(--text-muted)"}`} key={seconds} onClick={() => props.onWindow(seconds)} type="button">{seconds} 秒</button>)}</div>
     {props.linkReason && <p className="m-0 mt-2 text-[10px] text-(--text-muted)">{props.linkReason}</p>}
