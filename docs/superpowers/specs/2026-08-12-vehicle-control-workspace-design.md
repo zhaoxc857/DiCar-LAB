@@ -1,6 +1,6 @@
 # DiCar Tune App 车辆与控制环工作区设计规格
 
-- 状态：待用户复核
+- 状态：已确认
 - 日期：2026-08-12
 - 主产品：Windows 桌面 App
 - 参考项目：`zbk666/IKUN-CAR-LAB` 的车型 YAML 插件与 Speed/Heading/Custom Loop 工作流
