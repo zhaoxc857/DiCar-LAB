@@ -49,3 +49,34 @@ export class VehicleProfileParseError extends Error {
     this.name = "VehicleProfileParseError";
   }
 }
+
+export type CompatibilityIssue = {
+  severity: "error" | "warning" | "info";
+  path: string;
+  message: string;
+};
+
+export type ResolvedControlLoop = {
+  id: string;
+  label: string;
+  category?: string;
+  hint?: string;
+  targetParamId: number | null;
+  targetWritable: boolean;
+  gainParamIds: Array<{ label: string; paramId: number }>;
+  telemetry: { target: number | null; feedback: number | null; error: number | null; outputs: number[] };
+  recommendedChannelIds: number[];
+};
+
+export type ResolvedParameterSection = { id: string; label: string; paramIds: number[] };
+export type ResolvedScopePreset = { id: string; label: string; channelIds: number[] };
+export type ResolvedVehicleWorkspace = {
+  profileId: string;
+  displayName: string;
+  type: string;
+  controlLoops: ResolvedControlLoop[];
+  parameterSections: ResolvedParameterSection[];
+  scopePresets: ResolvedScopePreset[];
+  issues: CompatibilityIssue[];
+  fallbackRequired: boolean;
+};
