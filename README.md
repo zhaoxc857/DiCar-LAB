@@ -73,7 +73,7 @@ DiCar Tune 通过 DCTP v1 协议连接车辆，在桌面端集中完成参数读
 
 ## 开发与验证
 
-需要 Node.js 22、pnpm 11 和 Rust stable：
+需要 Node.js 22 或更高、pnpm 11 和 Rust stable：
 
 ```powershell
 pnpm install --frozen-lockfile

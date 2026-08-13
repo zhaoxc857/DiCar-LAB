@@ -73,7 +73,7 @@ scope_presets:
 
 通用要求：
 
-- Node.js 22
+- Node.js 22 或更高（`.node-version` 固定当前推荐版本）
 - pnpm 11（仓库声明 `pnpm@11.16.0`）
 - Rust stable
 - Git
