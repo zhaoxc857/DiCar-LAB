@@ -509,6 +509,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dctp-device-c"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "dctp-protocol",
+ "dctp-sim",
+]
+
+[[package]]
 name = "dctp-protocol"
 version = "0.1.0"
 dependencies = [

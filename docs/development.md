@@ -22,6 +22,7 @@ flowchart LR
 - `dicar-app-core` 负责单线程 AppActor、会话、权限策略、参数工作区、链路预算和遥测缓冲。
 - `dctp-protocol` 只负责 DCTP v1 编解码和 payload 模型，不执行 IO。
 - `dctp-sim` 是确定性的 TCP 设备模拟器，用于协议、参数、遥测和桌面集成测试。
+- `firmware/dctp-device` 是车端 C99 参考实现：只依赖注入的串口、Flash 和时钟回调，不含具体芯片外设代码；`crates/dctp-device-c` 在 `cargo test` 时把它编译进来，用黄金向量和 Rust 协议栈做逐字节交叉验证（需要本机 C 编译器，Windows 上为 MSVC）。移植方式见 [firmware/dctp-device/README.md](../firmware/dctp-device/README.md)。
 
 ## 2. 仓库结构
 
@@ -34,7 +35,10 @@ apps/
 crates/
   dctp-protocol/         DCTP v1 wire codec 与消息模型
   dctp-sim/              确定性模拟设备和 TCP server
+  dctp-device-c/         车端 C 参考库的 Rust 交叉验证 harness
   dicar-app-core/        会话、AppActor、参数与遥测核心
+firmware/
+  dctp-device/           车端 DCTP v1 参考库（C99）与移植指南
 docs/
   user-guide.md          使用者手册
   development.md         本文
