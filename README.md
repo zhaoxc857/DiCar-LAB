@@ -37,6 +37,7 @@ DiCar Tune 通过 DCTP v1 协议连接车辆，在桌面端集中完成参数读
 - nanoUART-wl、HC-05 Bluetooth SPP 和通用 COM 配置。
 - 自动波特率探测、串口类型显示、链路带宽保护和连接诊断。
 - Owner、Tuner、Observer 本地演示权限与单车控制权提示。
+- 参数方案：保存整组 RAM 参数、按稳定 ID 审阅差异后应用、导出 JSON，固化成功自动生成带 Generation 的固化记录。
 - 内置 DCTP 模拟器、协议重试、CRC、会话和参数版本冲突处理。
 - 车端 DCTP v1 参考库（纯 C99、零动态分配），由 Rust 权威实现和黄金向量逐字节交叉验证。
 
