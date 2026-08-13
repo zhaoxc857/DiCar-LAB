@@ -157,3 +157,50 @@ it("clears the experiment subscription when none existed before the run", async 
     paused: true,
   });
 });
+
+it("reports a rejected cleanup operation and still reaches the done phase", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+    ok: false,
+    status: 500,
+    text: () => Promise.resolve("test failure"),
+  }));
+  act(() => {
+    useVehicleProfileStore.getState().importProfile(TUNABLE_PROFILE, false);
+    useVehicleProfileStore.getState().selectProfile("autotune-car");
+  });
+  const bridge = new MockBridge();
+  await openWizard(bridge);
+  await act(async () => {
+    await bridge.clearTelemetrySubscription();
+  });
+  vi.spyOn(bridge, "clearTelemetrySubscription").mockRejectedValueOnce(new Error("cleanup exploded"));
+  vi.useFakeTimers();
+
+  fireEvent.change(screen.getByLabelText(/API Key/), { target: { value: "sk-test" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: /速度环 Kp/ }));
+  fireEvent.change(screen.getByLabelText(/每轮保持时长/), { target: { value: "1000" } });
+  fireEvent.click(screen.getByRole("button", { name: "开始自动调参" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2_000);
+  });
+
+  expect(screen.getAllByText(/清除实验订阅失败：cleanup exploded/)).toHaveLength(2);
+  expect(screen.getByRole("button", { name: "完成" })).toBeInTheDocument();
+});
+
+it("reports a rejected pre-run snapshot without remaining stuck", async () => {
+  act(() => {
+    useVehicleProfileStore.getState().importProfile(TUNABLE_PROFILE, false);
+    useVehicleProfileStore.getState().selectProfile("autotune-car");
+  });
+  const bridge = new MockBridge();
+  await openWizard(bridge);
+  vi.spyOn(bridge, "getSnapshot").mockRejectedValueOnce(new Error("snapshot unavailable"));
+
+  fireEvent.change(screen.getByLabelText(/API Key/), { target: { value: "sk-test" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: /速度环 Kp/ }));
+  fireEvent.click(screen.getByRole("button", { name: "开始自动调参" }));
+
+  expect(await screen.findAllByText(/读取实验前状态失败：snapshot unavailable/)).toHaveLength(2);
+  expect(screen.getByRole("button", { name: "完成" })).toBeInTheDocument();
+});

@@ -51,7 +51,7 @@ export class DeepSeekClient implements AiChatClient {
       if (typeof content !== "string" || content.length === 0) throw new Error("AI 服务返回了空回复");
       return content;
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
+      if (isAbortError(error)) {
         if (signal?.aborted) throw new Error("AI 请求已取消");
         if (timeoutController.signal.aborted) throw new Error("AI 请求超时");
       }
@@ -60,6 +60,13 @@ export class DeepSeekClient implements AiChatClient {
       clearTimeout(timer);
     }
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "name" in error
+    && error.name === "AbortError";
 }
 
 /** 从模型输出中提取第一个 JSON 对象（容忍代码块围栏等噪声）。 */

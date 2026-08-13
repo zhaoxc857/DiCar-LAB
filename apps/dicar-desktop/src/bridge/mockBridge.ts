@@ -600,8 +600,9 @@ export class MockBridge implements DesktopBridge {
     const periodUs = Math.floor(1_000_000 / subscription.sampleRateHz);
     const due = Math.floor(this.#schedulerCarryUs / periodUs);
     if (due <= 0) return;
+    const emitted = Math.min(due, 500);
     this.#schedulerCarryUs -= due * periodUs;
-    this.advanceTelemetry(Math.min(due, 500));
+    this.advanceTelemetry(emitted);
   }
 
   #stopScheduler(): void {

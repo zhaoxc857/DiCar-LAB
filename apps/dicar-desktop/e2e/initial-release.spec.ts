@@ -72,10 +72,12 @@ test("车型速度环组织参数并只在确认后应用推荐波形", async ({
 
   await expect(page.getByText("实际", { exact: true })).toBeVisible();
   await expect(page.getByText("误差", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("目标速度")).toBeVisible();
   await expect(page.getByLabel("速度环 Kp")).toBeVisible();
+  await expect(page.getByLabel("速度环 Ki")).toBeVisible();
+  await expect(page.getByLabel("速度环 Kd")).toBeVisible();
   await expect(page.getByText("5/8 通道", { exact: true })).toBeVisible();
-  await expect(page.getByText(/设备清单未提供可写目标参数/)).toBeVisible();
-  await expect(page.getByText("5/8 通道", { exact: true })).toBeVisible();
+  await expect(page.getByText(/设备清单未提供可写目标参数/)).toHaveCount(0);
 
   await page.getByRole("button", { name: "应用 500 Hz 订阅" }).click();
   await expect(page.getByText("5/8 通道", { exact: true })).toBeVisible();

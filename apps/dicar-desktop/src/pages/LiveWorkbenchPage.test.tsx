@@ -57,8 +57,11 @@ it("organizes the simulator as a vehicle speed-control workspace", async () => {
   await screen.findByText("已就绪");
   fireEvent.click(screen.getByRole("button", { name: "速度环" }));
   expect(screen.getByText("目标", { exact: true })).toBeInTheDocument();
+  expect(screen.getByLabelText("目标速度")).toBeInTheDocument();
   expect(screen.getByLabelText("速度环 Kp")).toBeInTheDocument();
-  expect(screen.getByText(/设备清单未提供可写目标参数/)).toBeInTheDocument();
+  expect(screen.getByLabelText("速度环 Ki")).toBeInTheDocument();
+  expect(screen.getByLabelText("速度环 Kd")).toBeInTheDocument();
+  expect(screen.queryByText(/设备清单未提供可写目标参数/)).not.toBeInTheDocument();
   expect(screen.getByText("5/8 通道")).toBeInTheDocument();
   const focusedProfile = `schema_version: 1
 vehicle: { id: focused-car, display_name: 聚焦车型, type: 测试, order: 50 }

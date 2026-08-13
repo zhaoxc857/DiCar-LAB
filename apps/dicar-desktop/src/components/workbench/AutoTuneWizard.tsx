@@ -125,7 +125,15 @@ export function AutoTuneWizard({
     setSaveMessage(null);
     setPhase("running");
 
-    const before = await bridge.getSnapshot();
+    const before = await bridge.getSnapshot().catch((error: unknown) => {
+      const message = `读取实验前状态失败：${error instanceof Error ? error.message : String(error)}`;
+      setResult({ status: "failed", message, rounds: [], bestValues: null, bestRound: null });
+      setStatusText(message);
+      setPhase("done");
+      if (abortRef.current === controller) abortRef.current = null;
+      return null;
+    });
+    if (before === null) return;
     const originalTarget = before.parameters.find(({ paramId }) => paramId === loop.targetParamId);
     const targetKind = originalTarget?.ramValue.kind === "f32" ? "f32" : originalTarget?.ramValue.kind === "i32" ? "i32" : "u32";
     const feedbackChannel = loop.telemetry.feedback as number;
@@ -211,23 +219,31 @@ export function AutoTuneWizard({
       };
     } finally {
       const cleanupFailures: string[] = [];
+      const cleanup = async (label: string, operation: () => Promise<{ status: string; message: string }>) => {
+        try {
+          const result = await operation();
+          if (result.status !== "succeeded") {
+            cleanupFailures.push(`${label}：${result.message}`);
+            return false;
+          }
+          return true;
+        } catch (error) {
+          cleanupFailures.push(`${label}：${error instanceof Error ? error.message : String(error)}`);
+          return false;
+        }
+      };
       if (originalTarget !== undefined) {
-        const restored = await bridge.writeParameter(originalTarget.paramId, originalTarget.ramValue);
-        if (restored.status !== "succeeded") cleanupFailures.push(`恢复目标失败：${restored.message}`);
+        await cleanup("恢复目标失败", () => bridge.writeParameter(originalTarget.paramId, originalTarget.ramValue));
       }
       if (before.desiredSubscription === null) {
-        const cleared = await bridge.clearTelemetrySubscription();
-        if (cleared.status !== "succeeded") cleanupFailures.push(`清除实验订阅失败：${cleared.message}`);
+        await cleanup("清除实验订阅失败", () => bridge.clearTelemetrySubscription());
       } else {
-        const restored = await bridge.setTelemetrySubscription({
-          channelIds: before.desiredSubscription.channelIds,
-          sampleRateHz: before.desiredSubscription.sampleRateHz,
-        });
-        if (restored.status !== "succeeded") {
-          cleanupFailures.push(`恢复遥测订阅失败：${restored.message}`);
-        } else if (before.paused) {
-          const paused = await bridge.setPaused(true);
-          if (paused.status !== "succeeded") cleanupFailures.push(`恢复暂停状态失败：${paused.message}`);
+        const restored = await cleanup("恢复遥测订阅失败", () => bridge.setTelemetrySubscription({
+          channelIds: before.desiredSubscription!.channelIds,
+          sampleRateHz: before.desiredSubscription!.sampleRateHz,
+        }));
+        if (restored && before.paused) {
+          await cleanup("恢复暂停状态失败", () => bridge.setPaused(true));
         }
       }
       if (cleanupFailures.length > 0) {

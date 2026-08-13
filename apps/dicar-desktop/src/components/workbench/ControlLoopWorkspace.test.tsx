@@ -16,6 +16,9 @@ it("renders a resolved speed loop with role cards and existing typed controls", 
   expect(screen.getByText("目标", { exact: true })).toBeInTheDocument();
   expect(screen.getByText("实际", { exact: true })).toBeInTheDocument();
   expect(screen.getByText("误差", { exact: true })).toBeInTheDocument();
+  expect(screen.getByLabelText("目标速度")).toBeInTheDocument();
   expect(screen.getByLabelText("速度环 Kp")).toBeInTheDocument();
-  expect(screen.getByText(/设备清单未提供可写目标参数/)).toBeInTheDocument();
+  expect(screen.getByLabelText("速度环 Ki")).toBeInTheDocument();
+  expect(screen.getByLabelText("速度环 Kd")).toBeInTheDocument();
+  expect(screen.queryByText(/设备清单未提供可写目标参数/)).not.toBeInTheDocument();
 });

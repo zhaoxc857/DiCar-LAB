@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { vi } from "vitest";
 import { AppProviders } from "../../app/providers";
 import { MockBridge } from "../../bridge/mockBridge";
+import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { WaveformPanel } from "./WaveformPanel";
 
 it("enforces eight channels and sends the 500 Hz subscription", async () => {
@@ -134,9 +135,11 @@ it("moves a locked cursor to the retained boundary when its samples roll out", a
   fireEvent.click(canvas, { clientX: 200 });
 
   await act(async () => { bridge.advanceTelemetry(30_000); });
+  const retainedBoundaryUs = useWorkspaceStore.getState().buffer.first(200)?.timestampUs;
 
   expect(await screen.findByText("游标数据已滚出缓冲，已移至最早样本")).toBeInTheDocument();
-  expect(screen.getByRole("status", { name: "波形游标读数" })).toHaveTextContent(/游标 402000 µs/);
+  expect(retainedBoundaryUs).toBeTypeOf("number");
+  expect(screen.getByRole("status", { name: "波形游标读数" })).toHaveTextContent(`游标 ${retainedBoundaryUs} µs`);
 });
 
 it("applies each external request once and preserves later manual choices", async () => {

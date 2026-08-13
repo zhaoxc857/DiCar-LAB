@@ -146,6 +146,30 @@ it("uses the requested 100 Hz period and produces telemetry while observed", asy
   }
 });
 
+it("drops stale scheduler debt after capping a catch-up batch", async () => {
+  vi.useFakeTimers();
+  try {
+    const bridge = new MockBridge();
+    const batches: Extract<BridgeEvent, { event: "telemetryBatch" }>[] = [];
+    const unsubscribe = await bridge.subscribe((event) => {
+      if (event.event === "telemetryBatch") batches.push(event);
+    });
+    await bridge.connect({ kind: "simulator", address: "127.0.0.1:7100" });
+    await bridge.setTelemetrySubscription({ channelIds: [200], sampleRateHz: 500 });
+    batches.length = 0;
+
+    vi.setSystemTime(Date.now() + 2_000);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(batches.at(-1)?.data.points).toHaveLength(500);
+
+    await vi.advanceTimersByTimeAsync(20);
+    expect(batches.at(-1)?.data.points.length).toBeLessThan(100);
+    unsubscribe();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("keeps the dangerous target RAM-only and rejects invalid numeric writes", async () => {
   const bridge = new MockBridge();
   await bridge.connect({ kind: "simulator", address: "127.0.0.1:7100" });
