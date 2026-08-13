@@ -3,6 +3,7 @@ mod fault;
 mod priority_queue;
 mod request_cache;
 mod server;
+mod speed_loop;
 
 pub use device::{CommitFailure, SimConfig, SimDevice, SESSION_EXPIRATION_MS};
 pub use fault::{Direction, FaultAction, FaultInjector, FaultRule, MAX_FAULT_RULES};
