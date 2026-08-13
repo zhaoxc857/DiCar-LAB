@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { useDesktopBridge } from "../../app/providers";
 import type { ParameterSnapshot } from "../../domain/types";
+import { useTuningSnapshotStore } from "../../stores/tuningSnapshotStore";
+import { useVehicleProfileStore } from "../../stores/vehicleProfileStore";
+import { captureTuningSnapshot } from "../../tuning/snapshots";
 import { Button } from "../ui/button";
 import { formatValue } from "./TypedParameterControl";
 
 export function CommitReviewDialog({ open, records, onClose }: { open: boolean; records: ParameterSnapshot[]; onClose: () => void }) {
   const bridge = useDesktopBridge();
+  const profileId = useVehicleProfileStore((state) => state.selectedProfileId);
+  const saveSnapshot = useTuningSnapshotStore((state) => state.saveSnapshot);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (!open) return null;
@@ -14,6 +19,19 @@ export function CommitReviewDialog({ open, records, onClose }: { open: boolean; 
     setBusy(true);
     setError(null);
     const result = await bridge.commitParameters();
+    if (result.status === "succeeded") {
+      // 规格 §14：设备确认写入 Flash 后自动生成固化记录，关联 Generation。
+      const committed = await bridge.getSnapshot();
+      const record = captureTuningSnapshot(committed, {
+        name: `固化记录 ${new Date().toLocaleString("zh-CN")}`,
+        note: `固化 ${records.length} 项参数`,
+        origin: "commit",
+        profileId,
+        nowMs: Date.now(),
+        id: crypto.randomUUID(),
+      });
+      if (record !== null) saveSnapshot(record);
+    }
     setBusy(false);
     if (result.status === "succeeded") onClose();
     else setError(result.message);

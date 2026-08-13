@@ -100,6 +100,41 @@ test("车型任务在窄窗口中仍保持核心入口可达", async ({ page }) 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
+test("参数方案可保存、应用恢复 RAM 并在固化后生成记录", async ({ page }) => {
+  await page.goto("/live/car-01");
+  await page.getByRole("button", { name: "连接模拟器" }).click();
+  await expect(page.getByRole("button", { name: "断开设备" })).toBeVisible();
+
+  await page.getByLabel("速度环 Kp").fill("1.8");
+  await page.getByRole("button", { name: "写入 RAM" }).click();
+  await expect(page.getByText("1 项待固化")).toBeVisible();
+
+  await page.getByRole("button", { name: "参数方案" }).click();
+  await expect(page.getByRole("dialog", { name: "参数方案" })).toBeVisible();
+  await page.getByLabel("方案名称").fill("直道方案");
+  await page.getByRole("button", { name: "保存方案" }).click();
+  await expect(page.getByText(/已保存「直道方案」/)).toBeVisible();
+  await page.getByRole("button", { name: "关闭" }).click();
+
+  await page.getByLabel("速度环 Kp").fill("2.4");
+  await page.getByRole("button", { name: "写入 RAM" }).click();
+
+  await page.getByRole("button", { name: "参数方案" }).click();
+  await page.getByRole("button", { name: "应用", exact: true }).click();
+  await expect(page.getByText(/1 项将写入 RAM/)).toBeVisible();
+  await page.getByRole("button", { name: /写入 1 项到 RAM/ }).click();
+  await expect(page.getByText(/已写入 1 项/)).toBeVisible();
+  await page.getByRole("button", { name: "返回列表" }).click();
+  await page.getByRole("button", { name: "关闭" }).click();
+  await expect(page.getByLabel("速度环 Kp")).toHaveValue("1.8");
+
+  await page.getByRole("button", { name: "审阅并固化" }).click();
+  await page.getByRole("button", { name: "固化到 Flash" }).click();
+  await expect(page.getByText("0 项待固化")).toBeVisible();
+  await page.getByRole("button", { name: "参数方案" }).click();
+  await expect(page.getByText(/固化记录 · Gen 1/)).toBeVisible();
+});
+
 async function tabTo(page: Page, target: Locator, maxTabs = 48): Promise<void> {
   for (let index = 0; index < maxTabs; index += 1) {
     await page.keyboard.press("Tab");
