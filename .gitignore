@@ -1,5 +1,5 @@
-.superpowers/
 .worktrees/
+/release/
 /target/
 **/node_modules/
 **/dist/
