@@ -217,6 +217,14 @@ pub fn set_telemetry_subscription(
 
 #[cfg(any(target_env = "msvc", feature = "native-check"))]
 #[tauri::command]
+pub fn clear_telemetry_subscription(
+    state: State<'_, AppState>,
+) -> Result<OperationResult, BridgeErrorDto> {
+    state.dispatch(CoreCommand::ClearTelemetrySubscription)
+}
+
+#[cfg(any(target_env = "msvc", feature = "native-check"))]
+#[tauri::command]
 pub fn set_paused(
     state: State<'_, AppState>,
     paused: bool,

@@ -539,6 +539,20 @@ export class MockBridge implements DesktopBridge {
     this.#publishSnapshot();
   }
 
+  async clearTelemetrySubscription(): Promise<OperationResult> {
+    if (this.#snapshot.phase !== "ready") return this.#fail("设备未连接");
+    this.#snapshot = {
+      ...this.#snapshot,
+      revision: this.#snapshot.revision + 1,
+      desiredSubscription: null,
+      activeSubscription: null,
+      paused: true,
+    };
+    this.#publishSnapshot();
+    this.#stopScheduler();
+    return this.#complete("遥测订阅已清除");
+  }
+
   #speedLoopInput(): SpeedLoopInput {
     const value = (machineName: string, fallback: number) => {
       const parameter = this.#snapshot.parameters.find((record) => record.machineName === machineName);

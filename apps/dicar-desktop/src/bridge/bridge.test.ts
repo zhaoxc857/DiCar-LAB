@@ -215,3 +215,27 @@ it("stops its real-time scheduler when paused, disconnected, or unobserved", asy
     vi.useRealTimers();
   }
 });
+
+it("clears desired and active subscriptions and stops real-time sampling", async () => {
+  vi.useFakeTimers();
+  try {
+    const bridge = new MockBridge();
+    let batches = 0;
+    await bridge.subscribe((event) => {
+      if (event.event === "telemetryBatch") batches += 1;
+    });
+    await bridge.connect({ kind: "simulator", address: "127.0.0.1:7100" });
+    await bridge.clearTelemetrySubscription();
+
+    expect(await bridge.getSnapshot()).toMatchObject({
+      desiredSubscription: null,
+      activeSubscription: null,
+      paused: true,
+    });
+    const cleared = batches;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(batches).toBe(cleared);
+  } finally {
+    vi.useRealTimers();
+  }
+});

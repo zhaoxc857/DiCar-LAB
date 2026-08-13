@@ -185,6 +185,48 @@ fn actor_connects_writes_subscribes_pauses_and_streams_ordered_events() {
 }
 
 #[test]
+fn clear_telemetry_subscription_removes_desired_and_active_state() {
+    let server = SimulatorServer::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+    let actor = AppActorHandle::spawn(CoreConfig::simulator(server.local_addr())).unwrap();
+    actor.send(CoreCommand::Connect).unwrap();
+    wait_until(Duration::from_secs(2), || {
+        actor.snapshot().phase == SnapshotPhase::Ready
+    });
+    let channel_ids = actor
+        .snapshot()
+        .telemetry_descriptors
+        .iter()
+        .take(2)
+        .map(|descriptor| descriptor.channel_id)
+        .collect();
+    actor
+        .send(CoreCommand::SetTelemetrySubscription {
+            channel_ids,
+            sample_rate_hz: 100,
+        })
+        .unwrap();
+    wait_until(Duration::from_secs(1), || {
+        actor.snapshot().active_subscription.is_some()
+    });
+
+    actor.send(CoreCommand::ClearTelemetrySubscription).unwrap();
+    wait_until(Duration::from_secs(1), || {
+        let snapshot = actor.snapshot();
+        snapshot.desired_subscription.is_none()
+            && snapshot.active_subscription.is_none()
+            && snapshot.paused
+    });
+
+    let cleared = actor.snapshot();
+    assert!(cleared.desired_subscription.is_none());
+    assert!(cleared.active_subscription.is_none());
+    assert!(cleared.paused);
+
+    actor.shutdown().unwrap();
+    server.shutdown().unwrap();
+}
+
+#[test]
 fn unexpected_disconnect_marks_parameter_truth_unknown_without_replaying_subscription() {
     let server = SimulatorServer::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
     let actor = AppActorHandle::spawn(CoreConfig::simulator(server.local_addr())).unwrap();

@@ -127,6 +127,7 @@ pub enum CoreCommand {
         channel_ids: Vec<u32>,
         sample_rate_hz: u16,
     },
+    ClearTelemetrySubscription,
     SetPaused {
         paused: bool,
     },
@@ -609,6 +610,7 @@ impl ActorRuntime {
                 channel_ids,
                 sample_rate_hz,
             } => self.set_subscription(channel_ids, sample_rate_hz),
+            CoreCommand::ClearTelemetrySubscription => self.clear_subscription(),
             CoreCommand::SetPaused { paused } => self.set_paused(paused),
             CoreCommand::SelectAccessProfile { profile } => {
                 self.access = profile.into();
@@ -861,6 +863,19 @@ impl ActorRuntime {
             self.set_subscription(desired.channel_ids, desired.sample_rate_hz)?;
             Ok("波形已恢复")
         }
+    }
+
+    fn clear_subscription(&mut self) -> Result<&'static str, String> {
+        let session = self.session.as_mut().ok_or("设备未连接")?;
+        session
+            .request(MessageType::TelemetryStop, Vec::new())
+            .map_err(|error| error.to_string())?;
+        self.flush_telemetry(true);
+        self.desired_subscription = None;
+        self.active_subscription = None;
+        self.paused = true;
+        self.accumulator = None;
+        Ok("遥测订阅已清除")
     }
 
     fn add_marker(&mut self, label: String) -> Result<&'static str, String> {

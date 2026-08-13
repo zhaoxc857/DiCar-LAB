@@ -30,6 +30,7 @@ pub fn command_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         commands::revert_all,
         commands::undo_last,
         commands::set_telemetry_subscription,
+        commands::clear_telemetry_subscription,
         commands::set_paused,
         commands::add_marker,
         commands::select_access_profile,

@@ -21,6 +21,7 @@ export interface DesktopBridge {
   revertAll(): Promise<OperationResult>;
   undoLast(): Promise<OperationResult>;
   setTelemetrySubscription(request: TelemetrySubscriptionRequest): Promise<OperationResult>;
+  clearTelemetrySubscription(): Promise<OperationResult>;
   setPaused(paused: boolean): Promise<OperationResult>;
   addMarker(label: string): Promise<OperationResult>;
   resolveWindowClose(

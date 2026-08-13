@@ -74,6 +74,7 @@ it("maps typed bridge calls to the exact Tauri commands and arguments", async ()
   const ports = await bridge.listSerialPorts();
   await bridge.writeParameter(1, value);
   await bridge.setTelemetrySubscription({ channelIds: [200, 201], sampleRateHz: 500 });
+  await bridge.clearTelemetrySubscription();
   await bridge.resolveWindowClose(7, "disconnectKeepUnknown");
   await bridge.getSnapshot();
 
@@ -82,6 +83,7 @@ it("maps typed bridge calls to the exact Tauri commands and arguments", async ()
     ["list_serial_ports"],
     ["write_parameter", { paramId: 1, value }],
     ["set_telemetry_subscription", { request: { channelIds: [200, 201], sampleRateHz: 500 } }],
+    ["clear_telemetry_subscription"],
     ["resolve_window_close", { requestId: 7, decision: "disconnectKeepUnknown" }],
     ["get_snapshot"],
   ]);

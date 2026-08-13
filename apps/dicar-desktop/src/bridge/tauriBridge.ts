@@ -45,6 +45,10 @@ export class TauriBridge implements DesktopBridge {
     return invoke("set_telemetry_subscription", { request });
   }
 
+  clearTelemetrySubscription(): Promise<OperationResult> {
+    return invoke("clear_telemetry_subscription");
+  }
+
   setPaused(paused: boolean): Promise<OperationResult> {
     return invoke("set_paused", { paused });
   }
