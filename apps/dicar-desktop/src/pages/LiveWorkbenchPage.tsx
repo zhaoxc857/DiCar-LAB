@@ -1,5 +1,6 @@
-import { BookmarksSimple, WaveSine } from "@phosphor-icons/react";
+import { BookmarksSimple, Robot, WaveSine } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AutoTuneWizard } from "../components/workbench/AutoTuneWizard";
 import { ChangeBar } from "../components/workbench/ChangeBar";
 import { CommitReviewDialog } from "../components/workbench/CommitReviewDialog";
 import { ControlLoopWorkspace } from "../components/workbench/ControlLoopWorkspace";
@@ -41,6 +42,7 @@ export function LiveWorkbenchPage() {
   const [selectedParamId, setSelectedParamId] = useState<number | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  const [autoTuneOpen, setAutoTuneOpen] = useState(false);
   const [waveformRequest, setWaveformRequest] = useState<WaveformSelectionRequest | null>(null);
   const requestId = useRef(0);
   const recommendationSignature = useRef<string | null>(null);
@@ -86,7 +88,7 @@ export function LiveWorkbenchPage() {
   }
 
   return <main className="w-full px-3 py-4 lg:px-5" id="main-content">
-    <header className="mb-4 flex flex-wrap items-end justify-between gap-3"><div className="flex items-center gap-3"><WaveSine className="text-(--interactive)" size={28} /><div><h1 className="m-0 text-xl">实时调参与波形</h1><p className="m-0 mt-1 text-xs text-(--text-muted)">{workspace.displayName} · {records.length} 个设备参数 · {telemetry.length} 个遥测通道</p></div></div><div className="flex items-center gap-3"><button className="inline-flex cursor-pointer items-center gap-1.5 rounded border border-(--border) bg-transparent px-2.5 py-1.5 text-xs text-(--text) hover:border-(--interactive)" onClick={() => setSnapshotsOpen(true)} type="button"><BookmarksSimple size={15} />参数方案</button><div className="font-mono text-[10px] text-(--text-muted)">RAM ≠ FLASH · ACK TRUTH · REV {snapshot?.revision ?? 0}</div></div></header>
+    <header className="mb-4 flex flex-wrap items-end justify-between gap-3"><div className="flex items-center gap-3"><WaveSine className="text-(--interactive)" size={28} /><div><h1 className="m-0 text-xl">实时调参与波形</h1><p className="m-0 mt-1 text-xs text-(--text-muted)">{workspace.displayName} · {records.length} 个设备参数 · {telemetry.length} 个遥测通道</p></div></div><div className="flex items-center gap-3"><button className="inline-flex cursor-pointer items-center gap-1.5 rounded border border-(--border) bg-transparent px-2.5 py-1.5 text-xs text-(--text) hover:border-(--interactive)" onClick={() => setAutoTuneOpen(true)} type="button"><Robot size={15} />AI 调参</button><button className="inline-flex cursor-pointer items-center gap-1.5 rounded border border-(--border) bg-transparent px-2.5 py-1.5 text-xs text-(--text) hover:border-(--interactive)" onClick={() => setSnapshotsOpen(true)} type="button"><BookmarksSimple size={15} />参数方案</button><div className="font-mono text-[10px] text-(--text-muted)">RAM ≠ FLASH · ACK TRUTH · REV {snapshot?.revision ?? 0}</div></div></header>
     <LeasePanel />
     <div className="mt-3 grid min-h-[560px] gap-3 xl:grid-cols-[264px_minmax(420px,1fr)_minmax(440px,1.15fr)]">
       <div className="space-y-3"><WorkspaceNav onSelectTask={chooseTask} records={records} selectedTask={selectedTask} workspace={workspace} />{(selectedTask.kind === "all" || selectedTask.kind === "group") && <ParameterNav onSelectGroup={chooseGroup} onSelectParameter={setSelectedParamId} records={selectedTask.kind === "group" ? records.filter((record) => record.group === selectedTask.id) : records} selectedGroup={selectedGroup} selectedParamId={selectedParamId} />}</div>
@@ -96,6 +98,7 @@ export function LiveWorkbenchPage() {
     <ChangeBar dirtyCount={dirty.length} onReview={() => setReviewOpen(true)} />
     <CommitReviewDialog onClose={() => setReviewOpen(false)} open={reviewOpen} records={dirty} />
     <SnapshotManagerDialog onClose={() => setSnapshotsOpen(false)} open={snapshotsOpen} />
+    <AutoTuneWizard onClose={() => setAutoTuneOpen(false)} open={autoTuneOpen} records={records} workspace={workspace} />
   </main>;
 }
 
