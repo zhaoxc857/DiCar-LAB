@@ -14,6 +14,7 @@ import type {
   WindowCloseDecision,
 } from "../domain/types";
 import type { DesktopBridge } from "./desktopBridge";
+import { MAX_SPEED_MPS, SpeedLoopModel, type SpeedLoopInput, type SpeedLoopSnapshot } from "../tuning/speedLoopModel";
 
 type BridgeListener = (event: BridgeEvent) => void;
 type UnindexedBridgeEvent<T = BridgeEvent> = T extends { eventIndex: number }
@@ -84,7 +85,7 @@ function parameterFixtures(): ParameterSnapshot[] {
     numericParameter(1, "pid.kp", "速度环 Kp", "速度环 PID", "", "f32", 1.2, 0, 20, 0.01, "比例增益，影响速度误差的即时响应"),
     numericParameter(2, "pid.speed.ki", "速度环 Ki", "速度环 PID", "", "f32", 0.08, 0, 5, 0.001, "积分增益，用于消除稳态误差"),
     numericParameter(3, "pid.speed.kd", "速度环 Kd", "速度环 PID", "", "f32", 0.002, 0, 1, 0.0001, "微分增益，用于抑制快速变化"),
-    numericParameter(4, "control.target_speed_mps", "目标速度", "速度环 PID", "m/s", "f32", 2.5, 0, 8, 0.05, "测试阶段目标车速", true),
+    numericParameter(4, "control.target_speed_mps", "目标速度", "速度环 PID", "m/s", "f32", 0, 0, 8, 0.05, "测试阶段目标车速", true, false),
     numericParameter(100, "encoder.left.ppr", "左编码器 PPR", "编码器与车轮", "pulse/rev", "u32", 512, 1, 65535, 1, "左编码器每机械转输出的脉冲数"),
     numericParameter(101, "encoder.right.ppr", "右编码器 PPR", "编码器与车轮", "pulse/rev", "u32", 512, 1, 65535, 1, "右编码器每机械转输出的脉冲数"),
     enumParameter(102, "encoder.quadrature_multiplier", "正交倍频", "编码器与车轮", 4, [{ value: 1, label: "×1" }, { value: 2, label: "×2" }, { value: 4, label: "×4" }]),
@@ -116,9 +117,10 @@ function numericParameter(
   step: number,
   description?: string,
   dangerous = false,
+  persistent = true,
 ): ParameterSnapshot {
   const parameterValue = { kind, value } as ParameterValue;
-  return { paramId, machineName, displayName, group, unit, ramValue: parameterValue, persistedValue: parameterValue, revision: 1, dirty: false, syncKnown: false, writeState: "idle", writable: true, dangerous, lastError: null, description, numeric: { min, max, step } };
+  return { paramId, machineName, displayName, group, unit, ramValue: parameterValue, persistedValue: persistent ? parameterValue : null, revision: 1, dirty: false, syncKnown: false, writeState: "idle", writable: true, dangerous, lastError: null, description, numeric: { min, max, step } };
 }
 
 function boolParameter(paramId: number, machineName: string, displayName: string, group: string, value: boolean): ParameterSnapshot {
@@ -142,6 +144,10 @@ export class MockBridge implements DesktopBridge {
   #activeCloseRequest: number | null = null;
   #history: Array<{ paramId: number; value: ParameterValue }> = [];
   #snapshot = disconnectedSnapshot();
+  #speedLoop = new SpeedLoopModel();
+  #scheduler: ReturnType<typeof setInterval> | null = null;
+  #schedulerLastMs = 0;
+  #schedulerCarryUs = 0;
 
   async listSerialPorts(): Promise<SerialPortDescriptor[]> {
     throw new Error("当前 Web 预览不能访问真实串口，请使用桌面 App");
@@ -149,13 +155,20 @@ export class MockBridge implements DesktopBridge {
 
   async subscribe(listener: BridgeListener): Promise<() => void> {
     this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
+    this.#reconcileScheduler();
+    return () => {
+      this.#listeners.delete(listener);
+      this.#reconcileScheduler();
+    };
   }
 
   async connect(endpoint: Endpoint): Promise<OperationResult> {
     if (endpoint.kind === "serial") {
       return this.#fail("当前 Web 预览不能访问真实串口，请使用桌面 App");
     }
+    this.#sampleSequence = 0;
+    this.#timestampUs = 0;
+    this.#speedLoop.reset();
     this.#snapshot = {
       ...this.#snapshot,
       revision: this.#snapshot.revision + 1,
@@ -185,6 +198,7 @@ export class MockBridge implements DesktopBridge {
     this.#snapshot.desiredSubscription = this.#snapshot.activeSubscription;
     this.#publish({ event: "snapshotChanged", data: this.#snapshot });
     this.advanceTelemetry(200);
+    this.#restartScheduler();
     return this.#complete("已连接模拟器");
   }
 
@@ -201,12 +215,24 @@ export class MockBridge implements DesktopBridge {
     const current = this.#snapshot.parameters[index];
     if (!current.writable) return this.#fail("参数只读");
     if (current.ramValue.kind !== value.kind) return this.#fail("参数类型不匹配");
+    if (value.kind !== "bool") {
+      if (!Number.isFinite(value.value)) return this.#fail("参数值必须是有限数值");
+      if ((value.kind === "i32" || value.kind === "u32" || value.kind === "enum") && !Number.isInteger(value.value)) {
+        return this.#fail("整数参数不能包含小数");
+      }
+      if (current.numeric !== undefined && (value.value < current.numeric.min || value.value > current.numeric.max)) {
+        return this.#fail(`参数值必须在 ${current.numeric.min}–${current.numeric.max} 范围内`);
+      }
+      if (current.enumOptions !== undefined && !current.enumOptions.some((option) => option.value === value.value)) {
+        return this.#fail("枚举参数值无效");
+      }
+    }
     this.#history.push({ paramId, value: current.ramValue });
     const next: ParameterSnapshot = {
       ...current,
       ramValue: value,
       revision: (current.revision + 1) >>> 0,
-      dirty: !sameValue(value, current.persistedValue),
+      dirty: current.persistedValue !== null && !sameValue(value, current.persistedValue),
       lastError: null,
     };
     this.#replaceParameter(index, next);
@@ -296,6 +322,7 @@ export class MockBridge implements DesktopBridge {
     };
     this.#publishSnapshot();
     this.advanceTelemetry(50);
+    this.#restartScheduler();
     return this.#complete("遥测订阅已生效");
   }
 
@@ -324,6 +351,7 @@ export class MockBridge implements DesktopBridge {
       };
     }
     this.#publishSnapshot();
+    this.#restartScheduler();
     return this.#complete(paused ? "波形已暂停" : "波形已恢复");
   }
 
@@ -399,14 +427,21 @@ export class MockBridge implements DesktopBridge {
     const subscription = this.#snapshot.activeSubscription;
     if (subscription === null || sampleCount <= 0) return;
     const points: TelemetryPoint[] = [];
+    const periodUs = Math.floor(1_000_000 / subscription.sampleRateHz);
+    const input = this.#speedLoopInput();
     for (let sample = 0; sample < sampleCount; sample += 1) {
-      this.#timestampUs += 2_000;
+      this.#timestampUs += periodUs;
+      this.#speedLoop.advanceTo(this.#timestampUs, input);
+      const state = this.#speedLoop.snapshot(input);
       for (const [slot, channelId] of subscription.channelIds.entries()) {
+        const descriptor = telemetryDescriptors.find((candidate) => candidate.channelId === channelId);
         points.push({
           channelId,
           timestampUs: this.#timestampUs,
           sampleSequence: this.#sampleSequence & 0xffff,
-          value: deterministicValue(telemetryDescriptors.find((descriptor) => descriptor.channelId === channelId)?.telemetryType ?? "u32", slot, this.#sampleSequence),
+          value: descriptor === undefined
+            ? deterministicValue("u32", slot, this.#sampleSequence)
+            : telemetryValue(descriptor, input, state, slot, this.#sampleSequence),
         });
       }
       this.#sampleSequence += 1;
@@ -485,6 +520,7 @@ export class MockBridge implements DesktopBridge {
   }
 
   #applyDisconnect(reason: string): void {
+    this.#stopScheduler();
     this.#snapshot = {
       ...this.#snapshot,
       revision: this.#snapshot.revision + 1,
@@ -502,6 +538,63 @@ export class MockBridge implements DesktopBridge {
     };
     this.#publishSnapshot();
   }
+
+  #speedLoopInput(): SpeedLoopInput {
+    const value = (machineName: string, fallback: number) => {
+      const parameter = this.#snapshot.parameters.find((record) => record.machineName === machineName);
+      return parameter !== undefined && parameter.ramValue.kind !== "bool" && Number.isFinite(parameter.ramValue.value)
+        ? parameter.ramValue.value
+        : fallback;
+    };
+    return {
+      targetMps: value("control.target_speed_mps", 0),
+      kp: value("pid.kp", 1.2),
+      ki: value("pid.speed.ki", 0.08),
+      kd: value("pid.speed.kd", 0.002),
+    };
+  }
+
+  #restartScheduler(): void {
+    this.#stopScheduler();
+    this.#reconcileScheduler();
+  }
+
+  #reconcileScheduler(): void {
+    const shouldRun = this.#snapshot.phase === "ready"
+      && this.#snapshot.activeSubscription !== null
+      && !this.#snapshot.paused
+      && this.#listeners.size > 0;
+    if (!shouldRun) {
+      this.#stopScheduler();
+      return;
+    }
+    if (this.#scheduler !== null) return;
+    this.#schedulerLastMs = Date.now();
+    this.#schedulerCarryUs = 0;
+    this.#scheduler = setInterval(() => this.#runScheduler(), 20);
+  }
+
+  #runScheduler(): void {
+    const subscription = this.#snapshot.activeSubscription;
+    if (subscription === null || this.#snapshot.phase !== "ready" || this.#snapshot.paused || this.#listeners.size === 0) {
+      this.#reconcileScheduler();
+      return;
+    }
+    const nowMs = Date.now();
+    this.#schedulerCarryUs += Math.max(0, nowMs - this.#schedulerLastMs) * 1_000;
+    this.#schedulerLastMs = nowMs;
+    const periodUs = Math.floor(1_000_000 / subscription.sampleRateHz);
+    const due = Math.floor(this.#schedulerCarryUs / periodUs);
+    if (due <= 0) return;
+    this.#schedulerCarryUs -= due * periodUs;
+    this.advanceTelemetry(Math.min(due, 500));
+  }
+
+  #stopScheduler(): void {
+    if (this.#scheduler !== null) clearInterval(this.#scheduler);
+    this.#scheduler = null;
+    this.#schedulerCarryUs = 0;
+  }
 }
 
 function sameValue(left: ParameterValue, right: ParameterValue | null): boolean {
@@ -515,4 +608,27 @@ function deterministicValue(kind: TelemetryDescriptor["telemetryType"], slot: nu
     case "u32": return { kind, value: sequence + slot };
     case "flags32": return { kind, value: (sequence + slot) & 0xff };
   }
+}
+
+function telemetryValue(
+  descriptor: TelemetryDescriptor,
+  input: SpeedLoopInput,
+  state: SpeedLoopSnapshot,
+  slot: number,
+  sequence: number,
+): TelemetryValue {
+  switch (descriptor.machineName) {
+    case "drive.speed_mps": return { kind: "f32", value: state.speedMps };
+    case "drive.left_wheel_speed_mps": return { kind: "f32", value: clamp(state.speedMps * 0.99, -MAX_SPEED_MPS, MAX_SPEED_MPS) };
+    case "drive.right_wheel_speed_mps": return { kind: "f32", value: clamp(state.speedMps * 1.01, -MAX_SPEED_MPS, MAX_SPEED_MPS) };
+    case "drive.target_speed_mps": return { kind: "f32", value: input.targetMps };
+    case "drive.speed_error_mps": return { kind: "f32", value: state.errorMps };
+    case "motor.left_pwm":
+    case "motor.right_pwm": return { kind: "u32", value: Math.round(Math.abs(clamp(state.motorOutput, -1, 1)) * 1_000) };
+    default: return deterministicValue(descriptor.telemetryType, slot, sequence);
+  }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }

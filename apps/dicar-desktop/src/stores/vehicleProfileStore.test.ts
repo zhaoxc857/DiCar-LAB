@@ -18,6 +18,15 @@ it("packages a built-in profile that resolves useful simulator tasks", () => {
   const resolved = resolveVehicleWorkspace(builtIn!.profile, simulatorParameters(), simulatorTelemetry());
   expect(resolved.controlLoops.map(({ id }) => id)).toEqual(["speed"]);
   expect(resolved.controlLoops[0].recommendedChannelIds).toEqual([207, 200, 208, 209, 210]);
+  expect(resolved.controlLoops[0]).toMatchObject({
+    targetParamId: 4,
+    targetWritable: true,
+    gainParamIds: [
+      { label: "Kp", paramId: 1 },
+      { label: "Ki", paramId: 2 },
+      { label: "Kd", paramId: 3 },
+    ],
+  });
   expect(resolved.parameterSections.map(({ id }) => id)).toEqual(["encoder", "drive"]);
 });
 
@@ -87,7 +96,8 @@ function profileYaml(id: string, displayName: string): string {
 
 function simulatorParameters(): ParameterSnapshot[] {
   return [
-    parameter(1, "pid.kp", "f32"), parameter(100, "encoder.left.ppr", "u32"), parameter(101, "encoder.right.ppr", "u32"),
+    parameter(1, "pid.kp", "f32"), parameter(2, "pid.speed.ki", "f32"), parameter(3, "pid.speed.kd", "f32"),
+    parameter(4, "control.target_speed_mps", "f32"), parameter(100, "encoder.left.ppr", "u32"), parameter(101, "encoder.right.ppr", "u32"),
     parameter(102, "encoder.quadrature_multiplier", "enum"), parameter(105, "encoder.left.inverted", "bool"), parameter(106, "encoder.right.inverted", "bool"),
     parameter(107, "drive.wheel_diameter_mm", "f32"), parameter(108, "drive.gear_ratio", "f32"), parameter(109, "encoder.sample_period_us", "u32"),
     parameter(110, "encoder.speed_lpf_hz", "f32"), parameter(111, "encoder.jump_threshold_counts", "u32"), parameter(112, "encoder.max_credible_rpm", "f32"),

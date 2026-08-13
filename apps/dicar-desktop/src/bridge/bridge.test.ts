@@ -122,3 +122,96 @@ it("serializes dirty window-close requests and rejects stale decisions", async (
   expect(disconnected.phase).toBe("disconnected");
   expect(disconnected.parameters.every(({ syncKnown }) => !syncKnown)).toBe(true);
 });
+
+it("uses the requested 100 Hz period and produces telemetry while observed", async () => {
+  vi.useFakeTimers();
+  try {
+    const bridge = new MockBridge();
+    const batches: Extract<BridgeEvent, { event: "telemetryBatch" }>[] = [];
+    const unsubscribe = await bridge.subscribe((event) => {
+      if (event.event === "telemetryBatch") batches.push(event);
+    });
+    await bridge.connect({ kind: "simulator", address: "127.0.0.1:7100" });
+    await bridge.setTelemetrySubscription({ channelIds: [207, 200], sampleRateHz: 100 });
+    const before = batches.length;
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(batches.length).toBeGreaterThan(before);
+    const points = batches.at(-1)!.data.points;
+    expect(points.at(-2)!.timestampUs - points.at(-4)!.timestampUs).toBe(10_000);
+    unsubscribe();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("keeps the dangerous target RAM-only and rejects invalid numeric writes", async () => {
+  const bridge = new MockBridge();
+  await bridge.connect({ kind: "simulator", address: "127.0.0.1:7100" });
+
+  for (const value of [Number.NaN, Number.POSITIVE_INFINITY, -0.1, 8.1]) {
+    expect(await bridge.writeParameter(4, { kind: "f32", value })).toMatchObject({ status: "failed" });
+  }
+  expect(await bridge.writeParameter(4, { kind: "f32", value: 1 })).toMatchObject({ status: "succeeded" });
+
+  const snapshot = await bridge.getSnapshot();
+  expect(snapshot.dirtyCount).toBe(0);
+  expect(snapshot.parameters.find(({ paramId }) => paramId === 4)).toMatchObject({
+    ramValue: { kind: "f32", value: 1 },
+    persistedValue: null,
+    dangerous: true,
+    dirty: false,
+  });
+});
+
+it("drives target, speed, error, and PWM from RAM PID parameters", async () => {
+  const bridge = new MockBridge();
+  const batches: Extract<BridgeEvent, { event: "telemetryBatch" }>[] = [];
+  const unsubscribe = await bridge.subscribe((event) => {
+    if (event.event === "telemetryBatch") batches.push(event);
+  });
+  await bridge.connect({ kind: "simulator", address: "127.0.0.1:7100" });
+  await bridge.writeParameter(4, { kind: "f32", value: 1 });
+  await bridge.setTelemetrySubscription({ channelIds: [207, 200, 208, 209], sampleRateHz: 100 });
+  bridge.advanceTelemetry(300);
+  unsubscribe();
+
+  const points = batches.at(-1)!.data.points;
+  const latest = (channelId: number) => points.filter((point) => point.channelId === channelId).at(-1)!.value.value;
+  expect(latest(207)).toBe(1);
+  expect(latest(200)).toBeGreaterThan(0.7);
+  expect(Math.abs(latest(208))).toBeLessThan(0.3);
+  expect(latest(209)).toBeLessThanOrEqual(1_000);
+});
+
+it("stops its real-time scheduler when paused, disconnected, or unobserved", async () => {
+  vi.useFakeTimers();
+  try {
+    const bridge = new MockBridge();
+    let batches = 0;
+    const unsubscribe = await bridge.subscribe((event) => {
+      if (event.event === "telemetryBatch") batches += 1;
+    });
+    await bridge.connect({ kind: "simulator", address: "127.0.0.1:7100" });
+    await vi.advanceTimersByTimeAsync(40);
+    expect(batches).toBeGreaterThan(1);
+
+    await bridge.setPaused(true);
+    const paused = batches;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(batches).toBe(paused);
+
+    await bridge.setPaused(false);
+    await vi.advanceTimersByTimeAsync(40);
+    expect(batches).toBeGreaterThan(paused);
+    await bridge.disconnect();
+    const disconnected = batches;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(batches).toBe(disconnected);
+
+    unsubscribe();
+  } finally {
+    vi.useRealTimers();
+  }
+});
