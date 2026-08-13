@@ -55,6 +55,7 @@ export interface AutoTuneDeps {
   ai: AiChatClient;
   onRound(record: RoundRecord): void;
   isAborted(): boolean;
+  signal: AbortSignal;
 }
 
 interface AiProposal {
@@ -86,6 +87,7 @@ export async function runAutoTune(config: AutoTuneConfig, deps: AutoTuneDeps): P
     if (deps.isAborted()) return finish("aborted", "已手动中止，设备保持最佳参数");
 
     const metrics = await deps.runExperiment();
+    if (deps.isAborted()) return finish("aborted", "已手动中止，设备保持最佳参数");
     if (metrics === null) {
       return finish("failed", `第 ${round} 轮实验无效（样本不足或阶跃幅度为零），已停止`);
     }
@@ -107,8 +109,11 @@ export async function runAutoTune(config: AutoTuneConfig, deps: AutoTuneDeps): P
 
     let proposal: AiProposal;
     try {
-      proposal = parseProposal(await deps.ai.complete(buildMessages(config, rounds)), config);
+      proposal = parseProposal(await deps.ai.complete(buildMessages(config, rounds), deps.signal), config);
     } catch (error) {
+      if (deps.isAborted() || deps.signal.aborted) {
+        return finish("aborted", "已手动中止，设备保持最佳参数");
+      }
       return finish("failed", `AI 决策失败：${error instanceof Error ? error.message : String(error)}`);
     }
     aiReason = proposal.reason;

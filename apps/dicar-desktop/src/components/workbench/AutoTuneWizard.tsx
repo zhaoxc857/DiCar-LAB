@@ -24,8 +24,28 @@ const EXPERIMENT_SAMPLE_RATE_HZ = 100;
 const DEFAULT_MAX_STEP_RATIO = 0.2;
 const WATCHDOG = { maxOvershootPct: 80, maxOscillations: 6 };
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function sleepUntil(ms: number, signal: AbortSignal): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (signal.aborted) return false;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(50, deadline - Date.now())));
+  }
+  return !signal.aborted;
+}
+
+export function validateExperimentTargets(
+  target: ParameterSnapshot | undefined,
+  restValue: number,
+  stepValue: number,
+): string | null {
+  if (!Number.isFinite(restValue) || !Number.isFinite(stepValue)) return "静息值和阶跃值必须是有限数值";
+  if (stepValue === restValue) return "阶跃值必须不同于静息值";
+  if (target?.numeric === undefined) return "目标参数缺少数值范围";
+  const { min, max } = target.numeric;
+  if (restValue < min || restValue > max || stepValue < min || stepValue > max) {
+    return `静息值和阶跃值必须在 ${min}–${max} 范围内`;
+  }
+  return null;
 }
 
 export function AutoTuneWizard({
@@ -72,10 +92,14 @@ export function AutoTuneWizard({
   const [statusText, setStatusText] = useState("");
   const [result, setResult] = useState<AutoTuneResult | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const abortRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
   if (!open) return null;
 
   const chosen = gainRecords.filter(({ paramId }) => selectedParamIds.includes(paramId));
+  const targetRecord = loop?.targetParamId === null || loop === undefined
+    ? undefined
+    : records.find(({ paramId }) => paramId === loop.targetParamId);
+  const targetDenial = validateExperimentTargets(targetRecord, restValue, stepValue);
   const denial =
     profile.role === "observer"
       ? "仅观察者不能运行自动调参"
@@ -89,35 +113,23 @@ export function AutoTuneWizard({
               ? "请先填写 DeepSeek API Key（只保存在本机）"
               : chosen.length === 0
                 ? "请至少勾选一个要整定的增益参数"
-                : stepValue === restValue
-                  ? "阶跃值必须不同于静息值"
-                  : null;
+                : targetDenial;
 
   async function start() {
     if (denial !== null || loop === undefined || loop.targetParamId === null) return;
     settings.saveAiSettings(baseUrl, model, apiKey);
-    abortRef.current = false;
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLog([]);
     setResult(null);
     setSaveMessage(null);
     setPhase("running");
 
-    const targetRecord = records.find(({ paramId }) => paramId === loop.targetParamId);
-    const targetKind = targetRecord?.ramValue.kind === "f32" ? "f32" : targetRecord?.ramValue.kind === "i32" ? "i32" : "u32";
+    const before = await bridge.getSnapshot();
+    const originalTarget = before.parameters.find(({ paramId }) => paramId === loop.targetParamId);
+    const targetKind = originalTarget?.ramValue.kind === "f32" ? "f32" : originalTarget?.ramValue.kind === "i32" ? "i32" : "u32";
     const feedbackChannel = loop.telemetry.feedback as number;
     const subscriptionChannels = [...new Set([loop.telemetry.target, feedbackChannel].filter((id): id is number => id !== null))];
-
-    setStatusText("正在订阅实验所需的遥测通道…");
-    const subscribed = await bridge.setTelemetrySubscription({
-      channelIds: subscriptionChannels,
-      sampleRateHz: EXPERIMENT_SAMPLE_RATE_HZ,
-    });
-    if (subscribed.status !== "succeeded") {
-      setStatusText(`订阅遥测失败：${subscribed.message}`);
-      setPhase("done");
-      setResult({ status: "failed", message: subscribed.message, rounds: [], bestValues: null, bestRound: null });
-      return;
-    }
 
     const writeParam = async (paramId: number, kind: "f32" | "i32" | "u32", value: number) => {
       const outcome = await bridge.writeParameter(paramId, { kind, value } as ParameterSnapshot["ramValue"]);
@@ -125,10 +137,11 @@ export function AutoTuneWizard({
     };
 
     const runExperiment = async (): Promise<StepMetrics | null> => {
+      if (controller.signal.aborted) return null;
       const buffer = useWorkspaceStore.getState().buffer;
       const restFailure = await writeParam(loop.targetParamId as number, targetKind, restValue);
-      if (restFailure !== null) return null;
-      await sleep(SETTLE_MS);
+      if (restFailure !== null || controller.signal.aborted) return null;
+      if (!await sleepUntil(SETTLE_MS, controller.signal)) return null;
       const stepAtUs = buffer.latest(feedbackChannel)?.timestampUs ?? 0;
       const baselinePoints = buffer
         .snapshot(feedbackChannel, stepAtUs - BASELINE_WINDOW_US)
@@ -138,10 +151,12 @@ export function AutoTuneWizard({
           ? baselinePoints.reduce((sum, point) => sum + (point.value.value as number), 0) / baselinePoints.length
           : restValue;
       const stepFailure = await writeParam(loop.targetParamId as number, targetKind, stepValue);
-      if (stepFailure !== null) return null;
-      await sleep(holdMs);
+      if (stepFailure !== null || controller.signal.aborted) return null;
+      if (!await sleepUntil(holdMs, controller.signal)) return null;
       const windowPoints = useWorkspaceStore.getState().buffer.snapshot(feedbackChannel, stepAtUs);
-      await writeParam(loop.targetParamId as number, targetKind, restValue);
+      if (controller.signal.aborted) return null;
+      const returnFailure = await writeParam(loop.targetParamId as number, targetKind, restValue);
+      if (returnFailure !== null || controller.signal.aborted) return null;
       return extractStepMetrics({ stepAtUs, baseline, target: stepValue, feedback: windowPoints });
     };
 
@@ -157,16 +172,69 @@ export function AutoTuneWizard({
       initialValue: record.ramValue.value as number,
       kind: record.ramValue.kind as "f32" | "i32" | "u32",
     }));
-    const outcome = await runAutoTune(
-      { goal, maxRounds, params, watchdog: WATCHDOG },
-      {
-        writeParam,
-        runExperiment,
-        ai: new DeepSeekClient({ baseUrl, apiKey, model }),
-        onRound: (record) => setLog((previous) => [...previous, record]),
-        isAborted: () => abortRef.current,
-      },
-    );
+    let outcome: AutoTuneResult = {
+      status: "failed",
+      message: "自动调参未启动",
+      rounds: [],
+      bestValues: null,
+      bestRound: null,
+    };
+    try {
+      setStatusText("正在订阅实验所需的遥测通道…");
+      const subscribed = await bridge.setTelemetrySubscription({
+        channelIds: subscriptionChannels,
+        sampleRateHz: EXPERIMENT_SAMPLE_RATE_HZ,
+      });
+      if (subscribed.status !== "succeeded") {
+        outcome = { ...outcome, message: `订阅遥测失败：${subscribed.message}` };
+      } else {
+        setStatusText("循环运行中：AI 只写 RAM，随时可中止；首轮建议架空车轮。");
+        outcome = await runAutoTune(
+          { goal, maxRounds, params, watchdog: WATCHDOG },
+          {
+            writeParam,
+            runExperiment,
+            ai: new DeepSeekClient({ baseUrl, apiKey, model }),
+            onRound: (record) => setLog((previous) => [...previous, record]),
+            isAborted: () => controller.signal.aborted,
+            signal: controller.signal,
+          },
+        );
+      }
+    } catch (error) {
+      outcome = {
+        ...outcome,
+        status: controller.signal.aborted ? "aborted" : "failed",
+        message: controller.signal.aborted
+          ? "已手动中止"
+          : `自动调参失败：${error instanceof Error ? error.message : String(error)}`,
+      };
+    } finally {
+      const cleanupFailures: string[] = [];
+      if (originalTarget !== undefined) {
+        const restored = await bridge.writeParameter(originalTarget.paramId, originalTarget.ramValue);
+        if (restored.status !== "succeeded") cleanupFailures.push(`恢复目标失败：${restored.message}`);
+      }
+      if (before.desiredSubscription === null) {
+        const cleared = await bridge.clearTelemetrySubscription();
+        if (cleared.status !== "succeeded") cleanupFailures.push(`清除实验订阅失败：${cleared.message}`);
+      } else {
+        const restored = await bridge.setTelemetrySubscription({
+          channelIds: before.desiredSubscription.channelIds,
+          sampleRateHz: before.desiredSubscription.sampleRateHz,
+        });
+        if (restored.status !== "succeeded") {
+          cleanupFailures.push(`恢复遥测订阅失败：${restored.message}`);
+        } else if (before.paused) {
+          const paused = await bridge.setPaused(true);
+          if (paused.status !== "succeeded") cleanupFailures.push(`恢复暂停状态失败：${paused.message}`);
+        }
+      }
+      if (cleanupFailures.length > 0) {
+        outcome = { ...outcome, status: "failed", message: cleanupFailures.join("；") };
+      }
+      if (abortRef.current === controller) abortRef.current = null;
+    }
     setResult(outcome);
     setStatusText(outcome.message);
     setPhase("done");
@@ -373,7 +441,7 @@ export function AutoTuneWizard({
             </>
           )}
           {phase === "running" && (
-            <Button onClick={() => { abortRef.current = true; setStatusText("正在中止：本轮结束后回滚最佳参数…"); }} variant="secondary">
+            <Button onClick={() => { abortRef.current?.abort(); setStatusText("正在中止并恢复实验前状态…"); }} variant="secondary">
               中止并回滚
             </Button>
           )}

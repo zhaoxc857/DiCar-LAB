@@ -43,6 +43,7 @@ interface Harness {
   writes: Array<{ paramId: number; value: number }>;
   rounds: RoundRecord[];
   aborted: boolean;
+  controller?: AbortController;
 }
 
 function deps(harness: Harness, experiments: Array<StepMetrics | null>, ai: AiChatClient) {
@@ -58,6 +59,7 @@ function deps(harness: Harness, experiments: Array<StepMetrics | null>, ai: AiCh
       harness.rounds.push(record);
     },
     isAborted: () => harness.aborted,
+    signal: harness.controller?.signal ?? new AbortController().signal,
   };
 }
 
@@ -133,6 +135,36 @@ it("fails when the experiment window is invalid", async () => {
   const result = await runAutoTune(config(), deps(harness, [null], scriptedAi(["{}"])));
   expect(result.status).toBe("failed");
   expect(result.rounds).toHaveLength(0);
+});
+
+it("classifies an abort raised during an invalid experiment as aborted", async () => {
+  const harness: Harness = { writes: [], rounds: [], aborted: false };
+  const dependencies = deps(harness, [null], scriptedAi(["{}"]));
+  dependencies.runExperiment = async () => {
+    harness.aborted = true;
+    return null;
+  };
+
+  const result = await runAutoTune(config(), dependencies);
+
+  expect(result.status).toBe("aborted");
+});
+
+it("passes the cancellation signal to the AI client", async () => {
+  const controller = new AbortController();
+  const harness: Harness = { writes: [], rounds: [], aborted: false, controller };
+  const ai: AiChatClient = {
+    complete: async (_messages, signal) => {
+      expect(signal).toBe(controller.signal);
+      controller.abort();
+      harness.aborted = true;
+      throw new DOMException("aborted", "AbortError");
+    },
+  };
+
+  const result = await runAutoTune(config(), deps(harness, [metrics()], ai));
+
+  expect(result.status).toBe("aborted");
 });
 
 it("rejects proposals that neither converge nor suggest values", () => {

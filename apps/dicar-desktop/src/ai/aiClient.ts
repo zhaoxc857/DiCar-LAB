@@ -6,7 +6,7 @@ export interface AiChatMessage {
 }
 
 export interface AiChatClient {
-  complete(messages: AiChatMessage[]): Promise<string>;
+  complete(messages: AiChatMessage[], signal?: AbortSignal): Promise<string>;
 }
 
 export interface DeepSeekConfig {
@@ -22,9 +22,12 @@ export const DEFAULT_AI_MODEL = "deepseek-chat";
 export class DeepSeekClient implements AiChatClient {
   constructor(private readonly config: DeepSeekConfig) {}
 
-  async complete(messages: AiChatMessage[]): Promise<string> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 60_000);
+  async complete(messages: AiChatMessage[], signal?: AbortSignal): Promise<string> {
+    const timeoutController = new AbortController();
+    const timer = setTimeout(() => timeoutController.abort(), this.config.timeoutMs ?? 60_000);
+    const combinedSignal = signal === undefined
+      ? timeoutController.signal
+      : AbortSignal.any([signal, timeoutController.signal]);
     try {
       const response = await fetch(`${this.config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
         method: "POST",
@@ -38,7 +41,7 @@ export class DeepSeekClient implements AiChatClient {
           temperature: 0,
           response_format: { type: "json_object" },
         }),
-        signal: controller.signal,
+        signal: combinedSignal,
       });
       if (!response.ok) {
         throw new Error(`AI 服务返回 ${response.status}：${(await response.text()).slice(0, 200)}`);
@@ -48,7 +51,10 @@ export class DeepSeekClient implements AiChatClient {
       if (typeof content !== "string" || content.length === 0) throw new Error("AI 服务返回了空回复");
       return content;
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") throw new Error("AI 请求超时");
+      if (error instanceof DOMException && error.name === "AbortError") {
+        if (signal?.aborted) throw new Error("AI 请求已取消");
+        if (timeoutController.signal.aborted) throw new Error("AI 请求超时");
+      }
       throw error;
     } finally {
       clearTimeout(timer);
