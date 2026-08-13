@@ -58,7 +58,8 @@ vehicle: { id: my-diff-car, display_name: 我的差速车, type: 双轮差速, o
 control_loops:
   - id: speed
     label: 速度环
-    gains: { Kp: pid.kp }
+    target_parameter: control.target_speed_mps
+    gains: { Kp: pid.kp, Ki: pid.speed.ki, Kd: pid.speed.kd }
     telemetry:
       target: drive.target_speed_mps
       feedback: drive.speed_mps
@@ -127,6 +128,14 @@ cargo run -p dctp-sim -- --listen 127.0.0.1:7100
 ```
 
 Windows 发布版使用 Tauri 内嵌的 `SimulatorServer`，监听系统分配的本地端口，不依赖上述独立进程。
+
+Rust `dctp-sim` 与 Web `MockBridge` 都实现相同语义的简化速度闭环：固定 2 ms 内部控制步长、PID 控制器和一阶车辆惯性。以下稳定名称在内置车型中构成完整调参契约：
+
+- `pid.kp`、`pid.speed.ki`、`pid.speed.kd`：可写、可持久化，但自动调参只修改 RAM，固化仍需人工确认。
+- `control.target_speed_mps`：可写、dangerous、非持久化，仅作为实验激励，不进入 Flash dirty/commit 集合。
+- `drive.target_speed_mps`、`drive.speed_mps`、`drive.speed_error_mps`、左右轮速和左右 PWM：由闭环模型动态生成。
+
+Mock 遥测按请求采样率生成设备时间戳，并仅在设备 ready、订阅 active、未暂停且存在监听者时运行实时调度器。AI 向导结束、失败或中止时会恢复实验前目标值与订阅/暂停状态；如果实验前没有订阅，则明确清除实验订阅。该清除操作复用 DCTP v1 `TELEMETRY_STOP`，没有增加 wire message。
 
 ## 6. 运行 Windows 桌面 App
 
