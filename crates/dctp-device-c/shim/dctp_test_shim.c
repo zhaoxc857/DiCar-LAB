@@ -11,6 +11,7 @@
 /* 与 dctp-sim fixed_manifest 一致的静态描述表 */
 
 #define WRITABLE (DCTP_PARAM_WRITABLE | DCTP_PARAM_PERSISTENT)
+#define RAM_DANGEROUS (DCTP_PARAM_WRITABLE | DCTP_PARAM_DANGEROUS)
 
 static const dctp_enum_option_t QUADRATURE_OPTIONS[] = {
     {1, "1x"},
@@ -25,8 +26,14 @@ static const dctp_enum_option_t QUADRATURE_OPTIONS[] = {
 #define NO_VALUE {0, {.u32 = 0}}
 
 static const dctp_param_descriptor_t PARAMS[] = {
-    {1, DCTP_TYPE_F32, WRITABLE, "pid.kp", "速度 Kp", "控制", "", VAL_F32(1.0f), DCTP_CONSTRAINT_NUMERIC,
-     VAL_F32(0.0f), VAL_F32(1000.0f), VAL_F32(0.01f), NULL, 0},
+    {1, DCTP_TYPE_F32, WRITABLE, "pid.kp", "速度 Kp", "控制", "", VAL_F32(1.2f), DCTP_CONSTRAINT_NUMERIC,
+     VAL_F32(0.0f), VAL_F32(20.0f), VAL_F32(0.01f), NULL, 0},
+    {2, DCTP_TYPE_F32, WRITABLE, "pid.speed.ki", "速度 Ki", "控制", "", VAL_F32(0.08f),
+     DCTP_CONSTRAINT_NUMERIC, VAL_F32(0.0f), VAL_F32(5.0f), VAL_F32(0.001f), NULL, 0},
+    {3, DCTP_TYPE_F32, WRITABLE, "pid.speed.kd", "速度 Kd", "控制", "", VAL_F32(0.002f),
+     DCTP_CONSTRAINT_NUMERIC, VAL_F32(0.0f), VAL_F32(1.0f), VAL_F32(0.0001f), NULL, 0},
+    {4, DCTP_TYPE_F32, RAM_DANGEROUS, "control.target_speed_mps", "目标速度", "驱动", "m/s", VAL_F32(0.0f),
+     DCTP_CONSTRAINT_NUMERIC, VAL_F32(0.0f), VAL_F32(8.0f), VAL_F32(0.05f), NULL, 0},
     {100, DCTP_TYPE_U32, WRITABLE, "encoder.left.ppr", "左编码器 PPR", "编码器", "pulse/rev", VAL_U32(512),
      DCTP_CONSTRAINT_NUMERIC, VAL_U32(1), VAL_U32(1000000), VAL_U32(1), NULL, 0},
     {101, DCTP_TYPE_U32, WRITABLE, "encoder.right.ppr", "右编码器 PPR", "编码器", "pulse/rev", VAL_U32(512),

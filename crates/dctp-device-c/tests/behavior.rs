@@ -253,11 +253,11 @@ fn param_read_reports_ram_flash_and_non_persistent_state() {
     let state = ParamState::decode(&take_one(&mut device).payload).unwrap();
     assert_eq!(state.param_id, 1);
     assert_eq!(state.revision, 0);
-    assert!(state.value.wire_eq(&ParamValue::F32(1.0)));
+    assert!(state.value.wire_eq(&ParamValue::F32(1.2)));
     assert!(state
         .persisted_value
         .unwrap()
-        .wire_eq(&ParamValue::F32(1.0)));
+        .wire_eq(&ParamValue::F32(1.2)));
 
     device.rx(
         &reliable_request(
@@ -610,7 +610,7 @@ fn commit_failure_paths_keep_the_previous_flash_state() {
         state
             .persisted_value
             .unwrap()
-            .wire_eq(&ParamValue::F32(1.0)),
+            .wire_eq(&ParamValue::F32(1.2)),
         "failed commit must keep the previous flash value"
     );
 
@@ -666,7 +666,7 @@ fn storage_blob_round_trips_into_a_fresh_device() {
     corrupted[last] ^= 0xFF;
     let mut rejecting = TestDevice::new(true, false);
     assert!(!rejecting.storage_apply(Some(&corrupted), None));
-    assert_eq!(rejecting.get_value_bits(1), Some((3, 1.0f32.to_bits())));
+    assert_eq!(rejecting.get_value_bits(1), Some((3, 1.2f32.to_bits())));
 
     let mut newer = TestDevice::new(true, false);
     let ack = handshake(&mut newer, 0);

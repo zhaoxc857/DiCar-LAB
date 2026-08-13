@@ -35,6 +35,11 @@ impl SpeedLoopModel {
         *self = Self::default();
     }
 
+    pub(crate) fn reset_at(&mut self, timestamp_us: u64) {
+        self.reset();
+        self.timestamp_us = timestamp_us;
+    }
+
     pub(crate) fn advance_to(&mut self, timestamp_us: u64, input: SpeedLoopInput) {
         let input = input.sanitized();
         while self.timestamp_us.saturating_add(CONTROL_STEP_US) <= timestamp_us {

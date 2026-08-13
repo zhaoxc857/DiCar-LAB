@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 
 use dctp_protocol::{
     encode_frame, EnumOption, ErrorCode, ErrorPayload, Frame, FrameFlags, Heartbeat, Hello,
-    HelloAck, MessageType, ParamConstraints, ParamFlags, ParamState, ParamType, ParamValue,
-    ParamWrite, ParamWriteAck, StreamDecoder, TelemetryType, WireDecode, WireEncode,
+    HelloAck, MessageType, ParamConstraints, ParamFlags, ParamRead, ParamState, ParamType,
+    ParamValue, ParamWrite, ParamWriteAck, StreamDecoder, TelemetryBatch, TelemetrySubscription,
+    TelemetryType, WireDecode, WireEncode,
 };
 use dctp_sim::{
     Direction, FaultAction, FaultInjector, FaultRule, RequestCache, RequestKey, SimConfig,
@@ -372,7 +373,28 @@ fn default_manifest_has_stable_pid_and_complete_encoder_calibration_parameters()
             "pid.kp",
             ParamType::F32,
             true,
-            numeric_f32(0.0, 1_000.0, 0.01),
+            numeric_f32(0.0, 20.0, 0.01),
+        ),
+        (
+            2,
+            "pid.speed.ki",
+            ParamType::F32,
+            true,
+            numeric_f32(0.0, 5.0, 0.001),
+        ),
+        (
+            3,
+            "pid.speed.kd",
+            ParamType::F32,
+            true,
+            numeric_f32(0.0, 1.0, 0.0001),
+        ),
+        (
+            4,
+            "control.target_speed_mps",
+            ParamType::F32,
+            true,
+            numeric_f32(0.0, 8.0, 0.05),
         ),
         (
             100,
@@ -505,6 +527,88 @@ fn default_manifest_has_stable_pid_and_complete_encoder_calibration_parameters()
         );
         assert_eq!(descriptor.constraints, constraints);
     }
+
+    let target = config
+        .manifest
+        .parameters
+        .iter()
+        .find(|descriptor| descriptor.param_id == 4)
+        .unwrap();
+    assert_ne!(
+        target.flags.bits() & ParamFlags::DANGEROUS.bits(),
+        0,
+        "the experiment stimulus must keep the dangerous marker"
+    );
+    assert_eq!(
+        target.flags.bits() & ParamFlags::PERSISTENT.bits(),
+        0,
+        "the experiment stimulus must remain RAM-only"
+    );
+}
+
+#[test]
+fn speed_loop_telemetry_responds_to_ram_parameters() {
+    let mut device = SimDevice::new(SimConfig::default());
+    let session = device.open_session(0x5151, 0).unwrap();
+
+    let read = only_response(device.handle(
+        request(
+            MessageType::ParamRead,
+            1,
+            session,
+            ParamRead { param_id: 4 }.encode().unwrap(),
+        ),
+        0,
+    ));
+    let initial = ParamState::decode(&read.payload).unwrap();
+    assert_eq!(initial.value, ParamValue::F32(0.0));
+    assert_eq!(initial.persisted_value, None);
+
+    let write = ParamWrite {
+        param_id: 4,
+        expected_revision: initial.revision,
+        value: ParamValue::F32(1.0),
+    };
+    let write_response = only_response(device.handle(
+        request(MessageType::ParamWrite, 2, session, write.encode().unwrap()),
+        1,
+    ));
+    assert_eq!(
+        write_response.header.message_type,
+        MessageType::ParamWriteAck
+    );
+
+    let subscription = TelemetrySubscription {
+        subscription_version: 1,
+        sample_rate_hz: 100,
+        channel_ids: vec![207, 200, 208, 209],
+    };
+    let subscribe_response = only_response(device.handle(
+        request(
+            MessageType::TelemetrySubscribe,
+            3,
+            session,
+            subscription.encode().unwrap(),
+        ),
+        2,
+    ));
+    assert_eq!(
+        subscribe_response.header.message_type,
+        MessageType::TelemetrySubscribeAck
+    );
+
+    let batch_frame = only_response(device.tick(2_999));
+    let batch = TelemetryBatch::decode(&batch_frame.payload, 4).unwrap();
+    let last = batch.samples.last().unwrap();
+    let target = f32::from_bits(last.values[0]);
+    let speed = f32::from_bits(last.values[1]);
+    let error = f32::from_bits(last.values[2]);
+    let pwm = last.values[3];
+
+    assert_eq!(target, 1.0);
+    assert!(speed > 0.7, "speed={speed}");
+    assert!(error.abs() < 0.3, "error={error}");
+    assert!(pwm <= 1_000, "pwm={pwm}");
 }
 
 #[test]

@@ -421,7 +421,7 @@ fn wire_handshake_manifest_read_write_and_telemetry_subscription_succeed() {
         .any(|parameter| parameter.param_id == 1));
     assert!(manifest.telemetry.len() >= 16);
     let before = harness.read_parameter(session, 1).unwrap();
-    assert_eq!(before.value, ParamValue::F32(1.0));
+    assert_eq!(before.value, ParamValue::F32(1.2));
     let accepted = harness.write_f32(session, 1, before.revision, 2.5).unwrap();
     assert_eq!(accepted.new_revision, 1);
     harness
@@ -476,7 +476,7 @@ fn commit_updates_flash_once_and_returns_generation() {
         .commit_with_sequence(session, vec![(param_id, write.new_revision)], sequence)
         .unwrap();
 
-    assert_eq!(before.persisted_value, Some(ParamValue::F32(1.0)));
+    assert_eq!(before.persisted_value, Some(ParamValue::F32(1.2)));
     assert_eq!(first, retry);
     assert_eq!(first.storage_generation, 1);
     let after = harness.read_parameter(session, param_id).unwrap();
@@ -503,7 +503,7 @@ fn failed_commit_keeps_flash_and_generation_while_retaining_ram_value() {
         assert_eq!(error_payload(&response).error_code, expected_error);
         let after = harness.read_parameter(session, 1).unwrap();
         assert_eq!(after.value, ParamValue::F32(2.5));
-        assert_eq!(after.persisted_value, Some(ParamValue::F32(1.0)));
+        assert_eq!(after.persisted_value, Some(ParamValue::F32(1.2)));
         assert_eq!(harness.device.storage_generation(), 0);
     }
 }

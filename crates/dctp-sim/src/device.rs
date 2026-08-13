@@ -7,7 +7,10 @@ use dctp_protocol::{
     WireDecode, WireEncode, MANIFEST_SCHEMA_VERSION, MAX_PAYLOAD_LEN, MAX_TELEMETRY_SAMPLES,
 };
 
-use crate::{Priority, QueuedFrame, RequestCache, RequestKey};
+use crate::{
+    speed_loop::{SpeedLoopInput, SpeedLoopModel, SpeedLoopSnapshot, MAX_SPEED_MPS},
+    Priority, QueuedFrame, RequestCache, RequestKey,
+};
 
 pub const SESSION_EXPIRATION_MS: u64 = 3_000;
 const HELLO_ACK_PAYLOAD_LEN: u16 = 46;
@@ -79,6 +82,7 @@ pub struct SimDevice {
     next_telemetry_at_us: Option<u64>,
     next_telemetry_sequence: u16,
     pending_dropped_telemetry_samples: u16,
+    speed_loop: SpeedLoopModel,
 }
 
 impl SimDevice {
@@ -110,6 +114,7 @@ impl SimDevice {
             next_telemetry_at_us: None,
             next_telemetry_sequence: 0,
             pending_dropped_telemetry_samples: 0,
+            speed_loop: SpeedLoopModel::default(),
         }
     }
 
@@ -250,24 +255,32 @@ impl SimDevice {
         self.next_telemetry_at_us =
             Some(next_telemetry_at_us.saturating_add(due_samples.saturating_mul(period_us)));
         let dt_us = u16::try_from(period_us).unwrap_or(0);
-        let samples = (0..emitted_samples)
-            .map(|index| TelemetrySample {
+        let speed_loop_input = self.speed_loop_input();
+        let mut samples = Vec::with_capacity(emitted_samples as usize);
+        for index in 0..emitted_samples {
+            let sample_timestamp_us = next_telemetry_at_us.saturating_add(
+                skipped_samples
+                    .saturating_add(index)
+                    .saturating_mul(period_us),
+            );
+            self.speed_loop
+                .advance_to(sample_timestamp_us, speed_loop_input);
+            let speed_loop_snapshot = self.speed_loop.snapshot(speed_loop_input);
+            samples.push(TelemetrySample {
                 dt_us: if index == 0 { 0 } else { dt_us },
                 values: descriptors
                     .iter()
                     .map(|descriptor| {
                         telemetry_value(
                             descriptor,
-                            next_telemetry_at_us.saturating_add(
-                                skipped_samples
-                                    .saturating_add(index)
-                                    .saturating_mul(period_us),
-                            ),
+                            sample_timestamp_us,
+                            speed_loop_input,
+                            speed_loop_snapshot,
                         )
                     })
                     .collect(),
-            })
-            .collect();
+            });
+        }
         let batch = TelemetryBatch {
             subscription_version: subscription.subscription_version,
             first_sample_sequence,
@@ -322,6 +335,7 @@ impl SimDevice {
         self.completed_hello = None;
         self.completed_close = None;
         self.clear_telemetry_state();
+        self.speed_loop.reset_at(now_ms.saturating_mul(1_000));
         Ok(session_id)
     }
 
@@ -825,6 +839,26 @@ impl SimDevice {
         self.pending_dropped_telemetry_samples = 0;
     }
 
+    fn speed_loop_input(&self) -> SpeedLoopInput {
+        SpeedLoopInput {
+            target_mps: self.f32_parameter("control.target_speed_mps", 0.0),
+            kp: self.f32_parameter("pid.kp", 1.2),
+            ki: self.f32_parameter("pid.speed.ki", 0.08),
+            kd: self.f32_parameter("pid.speed.kd", 0.002),
+        }
+    }
+
+    fn f32_parameter(&self, machine_name: &str, fallback: f32) -> f32 {
+        self.parameters
+            .iter()
+            .find(|parameter| parameter.descriptor.machine_name == machine_name)
+            .and_then(|parameter| match parameter.value {
+                ParamValue::F32(value) if value.is_finite() => Some(value),
+                _ => None,
+            })
+            .unwrap_or(fallback)
+    }
+
     fn error_response(
         &self,
         request: &Frame,
@@ -924,6 +958,7 @@ fn lower_hex(bytes: &[u8]) -> String {
 
 fn fixed_manifest() -> DeviceManifest {
     let writable = ParamFlags::WRITABLE | ParamFlags::PERSISTENT;
+    let ram_dangerous = ParamFlags::WRITABLE | ParamFlags::DANGEROUS;
     DeviceManifest {
         schema_version: MANIFEST_SCHEMA_VERSION,
         parameters: vec![
@@ -933,11 +968,47 @@ fn fixed_manifest() -> DeviceManifest {
                 "速度 Kp",
                 "控制",
                 "",
-                1.0,
+                1.2,
                 0.0,
-                1_000.0,
+                20.0,
                 0.01,
                 writable,
+            ),
+            numeric_f32(
+                2,
+                "pid.speed.ki",
+                "速度 Ki",
+                "控制",
+                "",
+                0.08,
+                0.0,
+                5.0,
+                0.001,
+                writable,
+            ),
+            numeric_f32(
+                3,
+                "pid.speed.kd",
+                "速度 Kd",
+                "控制",
+                "",
+                0.002,
+                0.0,
+                1.0,
+                0.0001,
+                writable,
+            ),
+            numeric_f32(
+                4,
+                "control.target_speed_mps",
+                "目标速度",
+                "驱动",
+                "m/s",
+                0.0,
+                0.0,
+                8.0,
+                0.05,
+                ram_dangerous,
             ),
             numeric_u32(
                 100,
@@ -1231,10 +1302,25 @@ fn telemetry_period_us(sample_rate_hz: u16) -> u64 {
     1_000_000 / u64::from(sample_rate_hz)
 }
 
-fn telemetry_value(descriptor: &TelemetryDescriptor, timestamp_us: u64) -> u32 {
-    let phase = (timestamp_us % 2_000_000) as f32 / 2_000_000.0;
+fn telemetry_value(
+    descriptor: &TelemetryDescriptor,
+    timestamp_us: u64,
+    input: SpeedLoopInput,
+    snapshot: SpeedLoopSnapshot,
+) -> u32 {
     match descriptor.machine_name.as_str() {
-        "drive.speed_mps" => (1.8 + (phase * std::f32::consts::TAU).sin() * 0.4).to_bits(),
+        "drive.speed_mps" => snapshot.speed_mps.to_bits(),
+        "drive.left_wheel_speed_mps" => (snapshot.speed_mps * 0.99)
+            .clamp(-MAX_SPEED_MPS, MAX_SPEED_MPS)
+            .to_bits(),
+        "drive.right_wheel_speed_mps" => (snapshot.speed_mps * 1.01)
+            .clamp(-MAX_SPEED_MPS, MAX_SPEED_MPS)
+            .to_bits(),
+        "drive.target_speed_mps" => input.target_mps.to_bits(),
+        "drive.speed_error_mps" => snapshot.error_mps.to_bits(),
+        "motor.left_pwm" | "motor.right_pwm" => {
+            (snapshot.motor_output.abs().clamp(0.0, 1.0) * 1_000.0).round() as u32
+        }
         "encoder.left_delta" => (18 + ((timestamp_us / 2_000) % 5) as i32) as u32,
         "encoder.right_delta" => (-18 - ((timestamp_us / 2_000) % 5) as i32) as u32,
         "encoder.left_total" => (timestamp_us / 2_000 * 20) as u32,
