@@ -135,13 +135,15 @@ Mock 时间戳增量改为 `1_000_000 / sampleRateHz`，不再固定为 2 ms。`
 实验订阅只包含目标和反馈，采样率为 100 Hz。实验结束后，无论原因是成功、轮数上限、看门狗、API 失败、写入失败或人工中止，统一执行：
 
 1. 恢复原目标 RAM 值；
-2. 恢复原订阅；若原先无订阅，则恢复暂停状态；
+2. 恢复原订阅；若原先无订阅，则调用 Bridge 的显式清除订阅操作，同时清空 desired/active subscription 并保持暂停；
 3. 保留引擎写回的最佳增益 RAM 值；
 4. 若清理失败，在最终状态消息中明确报告，不能把运行本身伪报为完整成功。
 
-等待实现为短分片的可中止等待。人工中止后不必等满整个保持窗口；实验返回无指标时，引擎先检查 abort 状态，再决定是 `aborted` 还是“实验无效”。
+等待实现为短分片的可中止等待。人工中止后不必等满整个保持窗口；实验返回无指标时，引擎先检查 abort 状态，再决定是 `aborted` 还是“实验无效”。向导同时用 `AbortController` 将取消信号传给自动调参引擎和 `DeepSeekClient`，因此等待 AI 回复时也能立即取消；客户端必须区分用户取消与内部 60 秒超时。
 
 配置校验增加目标静息值和阶跃值的有限性及 manifest 范围检查，避免启动后才收到设备拒绝。
+
+现有 Bridge 只有“暂停但保留 desired subscription”的操作，无法恢复“实验前无订阅”。本次增加 `clearTelemetrySubscription()`，Core/Tauri/Mock 均实现该接口。连接设备时它复用既有 `TELEMETRY_STOP` 请求，不增加新 wire 消息；清除成功后 desired 与 active subscription 均为 `null`，paused 为 `true`。
 
 ## 8. Mock 参数语义
 
@@ -178,6 +180,8 @@ Mock 写参数与设备端保持关键一致性：
 
 - 内置车型在 Mock 和 Rust 默认 manifest 上均解析为可自动调参速度环，并暴露 Kp/Ki/Kd。
 - 向导失败/中止路径恢复目标和订阅；引擎把中止实验识别为 aborted。
+- Core、TauriBridge 和 Mock 的显式清除订阅操作都清空 desired/active 状态，且暂停后的清除不会错误恢复旧订阅。
+- AI 客户端收到外部取消信号时终止 fetch 并报告取消，内部超时仍报告超时。
 - C shim manifest 与 Rust default manifest 继续逐字节相等，CRC 一致。
 - 六个黄金向量检查保持不变。
 
@@ -189,4 +193,3 @@ Mock 写参数与设备端保持关键一致性：
 - Rust `fmt --check`、workspace `clippy -D warnings`、workspace 全测试；
 - `generate_vectors --check`；
 - 对最终 diff 做一次安全约束复核，确认目标仍是 RAM-only、AI 不自动固化、协议 wire 未变。
-
