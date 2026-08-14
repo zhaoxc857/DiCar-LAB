@@ -1,11 +1,16 @@
 //! Native DiCar desktop bridge.
 
+mod ai_service;
 mod app_state;
 mod channel_forwarder;
 mod commands;
 mod simulator_runtime;
 mod window_guard;
 
+pub use ai_service::{
+    AiChatMessageDto, AiCompletionRequestDto, AiCredentialStatusDto, AiErrorCode, AiErrorDto,
+    AiServiceState,
+};
 pub use app_state::{AppState, BridgeErrorDto};
 pub use channel_forwarder::{
     FrontendEvent, FrontendEventPayload, FrontendEventSequencer, FrontendSink, WindowCloseRequest,
@@ -38,6 +43,11 @@ pub fn command_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         commands::open_core_channel,
         commands::close_core_channel,
         commands::resolve_window_close,
+        ai_service::ai_credential_status,
+        ai_service::ai_set_api_key,
+        ai_service::ai_clear_api_key,
+        ai_service::ai_complete,
+        ai_service::ai_cancel,
     ]
 }
 
@@ -47,10 +57,13 @@ pub fn run() {
 
     let (simulator, state) = spawn_bundled_runtime()
         .unwrap_or_else(|error| panic!("failed to start DiCar runtime: {}", error.message));
+    let ai_state = AiServiceState::new()
+        .unwrap_or_else(|error| panic!("failed to start AI desktop channel: {}", error.message));
 
     tauri::Builder::default()
         .manage(simulator)
         .manage(state)
+        .manage(ai_state)
         .invoke_handler(command_handler())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
