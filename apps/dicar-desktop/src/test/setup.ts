@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "fake-indexeddb/auto";
 
 // Node >= 25 predefines `localStorage`/`sessionStorage` getters on globalThis
 // that yield undefined unless --localstorage-file is set, which makes Vitest's

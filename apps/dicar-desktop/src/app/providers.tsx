@@ -6,24 +6,32 @@ import { MockBridge } from "../bridge/mockBridge";
 import { TauriBridge } from "../bridge/tauriBridge";
 import { WebSerialBridge, type BrowserSerial } from "../bridge/webSerialBridge";
 import { useBridgeSubscription } from "../hooks/useBridgeSubscription";
+import { getDefaultRecordingController, type RecordingController } from "../stores/recordingStore";
 
 const DesktopBridgeContext = createContext<DesktopBridge | null>(null);
 const AiPlatformContext = createContext<AiPlatform | null>(null);
+const RecordingControllerContext = createContext<RecordingController | null>(null);
 
 type AppProvidersProps = PropsWithChildren<{
   bridge?: DesktopBridge;
   aiPlatform?: AiPlatform;
+  recordingController?: RecordingController;
 }>;
 
-export function AppProviders({ bridge, aiPlatform, children }: AppProvidersProps) {
+export function AppProviders({ bridge, aiPlatform, recordingController, children }: AppProvidersProps) {
   const [resolvedBridge] = useState<DesktopBridge>(() => bridge ?? createDefaultBridge());
   const [resolvedAiPlatform] = useState<AiPlatform>(() => aiPlatform ?? createDefaultAiPlatform());
+  const [resolvedRecordingController] = useState<RecordingController>(
+    () => recordingController ?? getDefaultRecordingController(),
+  );
   return (
     <AiPlatformContext.Provider value={resolvedAiPlatform}>
-      <DesktopBridgeContext.Provider value={resolvedBridge}>
-        <BridgeSubscription bridge={resolvedBridge} />
-        {children}
-      </DesktopBridgeContext.Provider>
+      <RecordingControllerContext.Provider value={resolvedRecordingController}>
+        <DesktopBridgeContext.Provider value={resolvedBridge}>
+          <BridgeSubscription bridge={resolvedBridge} recordingController={resolvedRecordingController} />
+          {children}
+        </DesktopBridgeContext.Provider>
+      </RecordingControllerContext.Provider>
     </AiPlatformContext.Provider>
   );
 }
@@ -36,8 +44,8 @@ export function useAiPlatform(): AiPlatform {
   return platform;
 }
 
-function BridgeSubscription({ bridge }: { bridge: DesktopBridge }) {
-  useBridgeSubscription(bridge);
+function BridgeSubscription({ bridge, recordingController }: { bridge: DesktopBridge; recordingController: RecordingController }) {
+  useBridgeSubscription(bridge, recordingController);
   return null;
 }
 
@@ -57,6 +65,14 @@ function createDefaultBridge(): DesktopBridge {
     return new WebSerialBridge((navigator as Navigator & { serial: BrowserSerial }).serial);
   }
   return new MockBridge();
+}
+
+export function useRecordingController(): RecordingController {
+  const controller = useContext(RecordingControllerContext);
+  if (controller === null) {
+    throw new Error("useRecordingController 必须在 AppProviders 内使用");
+  }
+  return controller;
 }
 
 function createDefaultAiPlatform(): AiPlatform {
