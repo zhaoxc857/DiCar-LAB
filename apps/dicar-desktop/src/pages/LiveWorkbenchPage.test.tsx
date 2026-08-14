@@ -15,6 +15,9 @@ it("runs the B-to-A tuning flow with permissions, RAM truth, and commit review",
   expect(screen.getByRole("heading", { name: "实时调参与波形" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "参数目录" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "实时波形" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "波形记录" }));
+  expect(await screen.findByRole("dialog", { name: "波形记录库" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "关闭波形记录库" }));
   expect(screen.getByText("本地演示权限，不是远程安全边界")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));

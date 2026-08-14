@@ -7,9 +7,9 @@ import { computeChannelRange, timestampForX, xForTimestamp, type ChannelRange, t
 
 type Size = { width: number; height: number };
 
-type WaveformCanvasProps = { buffer: TelemetryRingBuffer; descriptors: TelemetryDescriptor[]; selectedIds: number[]; windowSeconds: number; probeTimestampUs: number | null; cursorAUs: number | null; cursorBUs: number | null; visualRevision: number; paused: boolean; yScaleMode: YScaleMode; fixedRanges: Record<number, ChannelRange>; onProbe: (timestampUs: number | null) => void; onLockCursor: (timestampUs: number) => void };
+type WaveformCanvasProps = { buffer: TelemetryRingBuffer; descriptors: TelemetryDescriptor[]; selectedIds: number[]; windowSeconds: number; probeTimestampUs: number | null; cursorAUs: number | null; cursorBUs: number | null; visualRevision: number; paused: boolean; yScaleMode: YScaleMode; fixedRanges: Record<number, ChannelRange>; onProbe: (timestampUs: number | null) => void; onLockCursor: (timestampUs: number) => void; viewportEndUs?: number | null; ariaLabel?: string };
 
-export function WaveformCanvas({ buffer, descriptors, selectedIds, windowSeconds, probeTimestampUs, cursorAUs, cursorBUs, visualRevision, paused, yScaleMode, fixedRanges, onProbe, onLockCursor }: WaveformCanvasProps) {
+export function WaveformCanvas({ buffer, descriptors, selectedIds, windowSeconds, probeTimestampUs, cursorAUs, cursorBUs, visualRevision, paused, yScaleMode, fixedRanges, onProbe, onLockCursor, viewportEndUs = null, ariaLabel = "实时波形" }: WaveformCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState<Size>({ width: 0, height: 0 });
 
@@ -24,23 +24,23 @@ export function WaveformCanvas({ buffer, descriptors, selectedIds, windowSeconds
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || size.width === 0 || size.height === 0) return;
-    const frame = requestAnimationFrame(() => draw(canvas, size, buffer, descriptors, selectedIds, windowSeconds, probeTimestampUs, cursorAUs, cursorBUs, yScaleMode, fixedRanges));
+    const frame = requestAnimationFrame(() => draw(canvas, size, buffer, descriptors, selectedIds, windowSeconds, probeTimestampUs, cursorAUs, cursorBUs, yScaleMode, fixedRanges, viewportEndUs));
     return () => cancelAnimationFrame(frame);
-  }, [buffer, cursorAUs, cursorBUs, descriptors, fixedRanges, paused, probeTimestampUs, selectedIds, size, visualRevision, windowSeconds, yScaleMode]);
+  }, [buffer, cursorAUs, cursorBUs, descriptors, fixedRanges, paused, probeTimestampUs, selectedIds, size, viewportEndUs, visualRevision, windowSeconds, yScaleMode]);
 
   function pointerTimestamp(event: React.MouseEvent<HTMLCanvasElement>): number | null {
     const canvas = canvasRef.current;
     if (!canvas) return null;
-    const bounds = visibleBounds(buffer, selectedIds, windowSeconds);
+    const bounds = visibleBounds(buffer, selectedIds, windowSeconds, viewportEndUs);
     if (bounds === null) return null;
     const rect = canvas.getBoundingClientRect();
     return timestampForX(event.clientX - rect.left, rect.width, bounds.firstUs, bounds.latestUs);
   }
 
-  return <canvas aria-label="实时波形" className="block h-48 w-full 2xl:h-64" onClick={(event) => { const timestamp = pointerTimestamp(event); if (timestamp !== null) onLockCursor(timestamp); }} onMouseLeave={() => onProbe(null)} onMouseMove={(event) => onProbe(pointerTimestamp(event))} ref={canvasRef} role="img" />;
+  return <canvas aria-label={ariaLabel} className="block h-48 w-full 2xl:h-64" onClick={(event) => { const timestamp = pointerTimestamp(event); if (timestamp !== null) onLockCursor(timestamp); }} onMouseLeave={() => onProbe(null)} onMouseMove={(event) => onProbe(pointerTimestamp(event))} ref={canvasRef} role="img" />;
 }
 
-function draw(canvas: HTMLCanvasElement, size: Size, buffer: TelemetryRingBuffer, descriptors: TelemetryDescriptor[], selectedIds: number[], windowSeconds: number, probeTimestampUs: number | null, cursorAUs: number | null, cursorBUs: number | null, yScaleMode: YScaleMode, fixedRanges: Record<number, ChannelRange>) {
+function draw(canvas: HTMLCanvasElement, size: Size, buffer: TelemetryRingBuffer, descriptors: TelemetryDescriptor[], selectedIds: number[], windowSeconds: number, probeTimestampUs: number | null, cursorAUs: number | null, cursorBUs: number | null, yScaleMode: YScaleMode, fixedRanges: Record<number, ChannelRange>, viewportEndUs: number | null) {
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   canvas.width = Math.max(1, Math.floor(size.width * dpr));
   canvas.height = Math.max(1, Math.floor(size.height * dpr));
@@ -54,12 +54,12 @@ function draw(canvas: HTMLCanvasElement, size: Size, buffer: TelemetryRingBuffer
   context.lineWidth = 1;
   for (let x = 0; x < size.width; x += 48) { context.beginPath(); context.moveTo(x, 0); context.lineTo(x, size.height); context.stroke(); }
   for (let y = 0; y < size.height; y += 32) { context.beginPath(); context.moveTo(0, y); context.lineTo(size.width, y); context.stroke(); }
-  const bounds = visibleBounds(buffer, selectedIds, windowSeconds);
+  const bounds = visibleBounds(buffer, selectedIds, windowSeconds, viewportEndUs);
   const latestUs = bounds?.latestUs ?? 0;
   const firstUs = bounds?.firstUs ?? 0;
   const bandHeight = Math.max(24, (size.height - 18) / Math.max(1, selectedIds.length));
   selectedIds.forEach((channelId, slot) => {
-    const points = buffer.snapshot(channelId, firstUs);
+    const points = buffer.snapshot(channelId, firstUs).filter((point) => point.timestampUs <= latestUs);
     if (points.length === 0) return;
     const rangePoints = yScaleMode === "global" ? buffer.snapshot(channelId) : points;
     const channelRange = yScaleMode === "fixed" ? fixedRanges[channelId] ?? computeChannelRange(points.map((point) => point.value.value)) : computeChannelRange(rangePoints.map((point) => point.value.value));
@@ -96,8 +96,8 @@ function draw(canvas: HTMLCanvasElement, size: Size, buffer: TelemetryRingBuffer
   drawCursor(context, cursorBUs, "B", "#fbbf24", [8, 4], size, firstUs, latestUs);
 }
 
-function visibleBounds(buffer: TelemetryRingBuffer, selectedIds: number[], windowSeconds: number): { firstUs: number; latestUs: number } | null {
-  const latestUs = Math.max(0, ...selectedIds.map((id) => buffer.latest(id)?.timestampUs ?? 0));
+function visibleBounds(buffer: TelemetryRingBuffer, selectedIds: number[], windowSeconds: number, viewportEndUs: number | null): { firstUs: number; latestUs: number } | null {
+  const latestUs = viewportEndUs ?? Math.max(0, ...selectedIds.map((id) => buffer.latest(id)?.timestampUs ?? 0));
   if (latestUs === 0) return null;
   return { latestUs, firstUs: Math.max(0, latestUs - windowSeconds * 1_000_000) };
 }
