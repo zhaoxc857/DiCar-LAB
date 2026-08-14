@@ -1,4 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import type { AiChatClient } from "../../ai/aiClient";
+import { UnavailableAiPlatform, type AiPlatform } from "../../ai/aiPlatform";
 import { App } from "../../app/App";
 import { AppProviders } from "../../app/providers";
 import { MockBridge } from "../../bridge/mockBridge";
@@ -21,7 +23,7 @@ control_loops:
 beforeEach(() => {
   localStorage.clear();
   useVehicleProfileStore.getState().reset();
-  useSettingsStore.getState().saveAiSettings("https://api.deepseek.com", "deepseek-chat", "");
+  useSettingsStore.getState().saveAiModel("deepseek-chat");
 });
 
 afterEach(() => {
@@ -29,14 +31,53 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function openWizard(bridge = new MockBridge()) {
+class TestAiPlatform implements AiPlatform {
+  readonly available = true;
+  configured = false;
+  savedKey: string | null = null;
+  readonly client: AiChatClient = {
+    complete: vi.fn().mockRejectedValue(new Error("AI service test failure")),
+  };
+
+  async getCredentialStatus() {
+    return { configured: this.configured };
+  }
+
+  async setApiKey(apiKey: string) {
+    this.savedKey = apiKey;
+    this.configured = true;
+  }
+
+  async clearApiKey() {
+    this.savedKey = null;
+    this.configured = false;
+  }
+
+  createClient() {
+    return this.client;
+  }
+}
+
+async function openWizard(bridge = new MockBridge(), aiPlatform: AiPlatform = new TestAiPlatform()) {
   window.history.pushState({}, "", "/live/car-01");
-  render(<AppProviders bridge={bridge}><App /></AppProviders>);
+  render(<AppProviders aiPlatform={aiPlatform} bridge={bridge}><App /></AppProviders>);
   await act(async () => undefined);
   fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
   await screen.findByText("已就绪");
-  fireEvent.click(screen.getByRole("button", { name: "AI 调参" }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "AI 调参" }));
+    await Promise.resolve();
+  });
   return screen.getByRole("dialog", { name: "AI 自动调参" });
+}
+
+async function saveApiKey(value = "sk-test") {
+  fireEvent.change(screen.getByLabelText(/API Key/), { target: { value } });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /保存 Key/ }));
+    await Promise.resolve();
+  });
+  expect(screen.getByText(/API Key 已安全保存/)).toBeInTheDocument();
 }
 
 it("explains when the vehicle profile has no auto-tunable control loop", async () => {
@@ -50,15 +91,30 @@ it("requires an API key and gain selection before starting", async () => {
     expect(useVehicleProfileStore.getState().importProfile(TUNABLE_PROFILE, false).status).toBe("imported");
     useVehicleProfileStore.getState().selectProfile("autotune-car");
   });
-  await openWizard();
+  const aiPlatform = new TestAiPlatform();
+  await openWizard(new MockBridge(), aiPlatform);
 
-  expect(screen.getByText(/请先填写 DeepSeek API Key/)).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText(/API Key/), { target: { value: "sk-test" } });
+  expect(await screen.findByText(/请先保存 DeepSeek API Key/)).toBeInTheDocument();
+  await saveApiKey("sk-test");
+  expect(screen.getByLabelText(/API Key/)).toHaveValue("");
+  expect(aiPlatform.savedKey).toBe("sk-test");
   expect(screen.getByText(/请至少勾选一个要整定的增益参数/)).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("checkbox", { name: /速度环 Kp/ }));
+  fireEvent.change(screen.getByLabelText("模型"), { target: { value: "bad model" } });
+  expect(screen.getByText(/模型名称只能包含/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "开始自动调参" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("模型"), { target: { value: "deepseek-chat" } });
   expect(screen.getByRole("button", { name: "开始自动调参" })).toBeEnabled();
   expect(screen.getByText(/首轮实验请将车辆架空/)).toBeInTheDocument();
+});
+
+it("does not accept credentials in browser or Mock mode", async () => {
+  await openWizard(new MockBridge(), new UnavailableAiPlatform());
+
+  expect(screen.getAllByText("AI 调参仅 Windows 桌面版可用")).toHaveLength(2);
+  expect(screen.queryByLabelText(/API Key/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "开始自动调参" })).toBeDisabled();
 });
 
 it("rejects non-finite, equal, and out-of-range experiment targets", () => {
@@ -88,11 +144,6 @@ it("rejects non-finite, equal, and out-of-range experiment targets", () => {
 });
 
 it("restores the original target and subscription after an AI failure", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-    ok: false,
-    status: 500,
-    text: () => Promise.resolve("test failure"),
-  }));
   act(() => {
     useVehicleProfileStore.getState().importProfile(TUNABLE_PROFILE, false);
     useVehicleProfileStore.getState().selectProfile("autotune-car");
@@ -104,9 +155,8 @@ it("restores the original target and subscription after an AI failure", async ()
     await bridge.setTelemetrySubscription({ channelIds: [200], sampleRateHz: 250 });
     await bridge.setPaused(true);
   });
+  await saveApiKey();
   vi.useFakeTimers();
-
-  fireEvent.change(screen.getByLabelText(/API Key/), { target: { value: "sk-test" } });
   fireEvent.click(screen.getByRole("checkbox", { name: /速度环 Kp/ }));
   fireEvent.change(screen.getByLabelText(/每轮保持时长/), { target: { value: "1000" } });
   fireEvent.click(screen.getByRole("button", { name: "开始自动调参" }));
@@ -123,11 +173,6 @@ it("restores the original target and subscription after an AI failure", async ()
 });
 
 it("clears the experiment subscription when none existed before the run", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-    ok: false,
-    status: 500,
-    text: () => Promise.resolve("test failure"),
-  }));
   act(() => {
     useVehicleProfileStore.getState().importProfile(TUNABLE_PROFILE, false);
     useVehicleProfileStore.getState().selectProfile("autotune-car");
@@ -139,9 +184,8 @@ it("clears the experiment subscription when none existed before the run", async 
     await bridge.clearTelemetrySubscription();
   });
   clearSpy.mockClear();
+  await saveApiKey();
   vi.useFakeTimers();
-
-  fireEvent.change(screen.getByLabelText(/API Key/), { target: { value: "sk-test" } });
   fireEvent.click(screen.getByRole("checkbox", { name: /速度环 Kp/ }));
   fireEvent.change(screen.getByLabelText(/每轮保持时长/), { target: { value: "1000" } });
   fireEvent.click(screen.getByRole("button", { name: "开始自动调参" }));
@@ -159,11 +203,6 @@ it("clears the experiment subscription when none existed before the run", async 
 });
 
 it("reports a rejected cleanup operation and still reaches the done phase", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-    ok: false,
-    status: 500,
-    text: () => Promise.resolve("test failure"),
-  }));
   act(() => {
     useVehicleProfileStore.getState().importProfile(TUNABLE_PROFILE, false);
     useVehicleProfileStore.getState().selectProfile("autotune-car");
@@ -174,9 +213,8 @@ it("reports a rejected cleanup operation and still reaches the done phase", asyn
     await bridge.clearTelemetrySubscription();
   });
   vi.spyOn(bridge, "clearTelemetrySubscription").mockRejectedValueOnce(new Error("cleanup exploded"));
+  await saveApiKey();
   vi.useFakeTimers();
-
-  fireEvent.change(screen.getByLabelText(/API Key/), { target: { value: "sk-test" } });
   fireEvent.click(screen.getByRole("checkbox", { name: /速度环 Kp/ }));
   fireEvent.change(screen.getByLabelText(/每轮保持时长/), { target: { value: "1000" } });
   fireEvent.click(screen.getByRole("button", { name: "开始自动调参" }));
@@ -197,7 +235,7 @@ it("reports a rejected pre-run snapshot without remaining stuck", async () => {
   await openWizard(bridge);
   vi.spyOn(bridge, "getSnapshot").mockRejectedValueOnce(new Error("snapshot unavailable"));
 
-  fireEvent.change(screen.getByLabelText(/API Key/), { target: { value: "sk-test" } });
+  await saveApiKey();
   fireEvent.click(screen.getByRole("checkbox", { name: /速度环 Kp/ }));
   fireEvent.click(screen.getByRole("button", { name: "开始自动调参" }));
 

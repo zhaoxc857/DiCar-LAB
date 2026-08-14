@@ -1,7 +1,7 @@
 import { Robot } from "@phosphor-icons/react";
-import { useRef, useState } from "react";
-import { useDesktopBridge } from "../../app/providers";
-import { DeepSeekClient } from "../../ai/aiClient";
+import { useEffect, useRef, useState } from "react";
+import { AI_DESKTOP_ONLY_MESSAGE, AI_MODEL_ERROR_MESSAGE, isSafeAiModel } from "../../ai/aiPlatform";
+import { useAiPlatform, useDesktopBridge } from "../../app/providers";
 import type { ParameterSnapshot } from "../../domain/types";
 import { useCollaborationStore } from "../../stores/collaborationStore";
 import { useConnectionStore } from "../../stores/connectionStore";
@@ -60,6 +60,7 @@ export function AutoTuneWizard({
   records: ParameterSnapshot[];
 }) {
   const bridge = useDesktopBridge();
+  const aiPlatform = useAiPlatform();
   const snapshot = useConnectionStore((state) => state.snapshot);
   const profile = useCollaborationStore((state) => state.profile);
   const profileId = useVehicleProfileStore((state) => state.selectedProfileId);
@@ -79,9 +80,11 @@ export function AutoTuneWizard({
         (record.ramValue.kind === "f32" || record.ramValue.kind === "i32" || record.ramValue.kind === "u32"),
     );
   const [selectedParamIds, setSelectedParamIds] = useState<number[]>([]);
-  const [apiKey, setApiKey] = useState(settings.aiApiKey);
-  const [baseUrl, setBaseUrl] = useState(settings.aiBaseUrl);
+  const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(settings.aiModel);
+  const [credentialConfigured, setCredentialConfigured] = useState(false);
+  const [credentialStatus, setCredentialStatus] = useState<"checking" | "ready" | "error">("checking");
+  const [credentialMessage, setCredentialMessage] = useState<string | null>(null);
   const [goal, setGoal] = useState("阶跃响应超调小于 5%，上升时间尽量短，无持续振荡");
   const [maxRounds, setMaxRounds] = useState(8);
   const [restValue, setRestValue] = useState(0);
@@ -93,6 +96,33 @@ export function AutoTuneWizard({
   const [result, setResult] = useState<AutoTuneResult | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setApiKey("");
+    setCredentialMessage(null);
+    if (!aiPlatform.available) {
+      setCredentialConfigured(false);
+      setCredentialStatus("ready");
+      return;
+    }
+    setCredentialStatus("checking");
+    void aiPlatform.getCredentialStatus().then(({ configured }) => {
+      if (!active) return;
+      setCredentialConfigured(configured);
+      setCredentialStatus("ready");
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setCredentialConfigured(false);
+      setCredentialStatus("error");
+      setCredentialMessage(error instanceof Error ? error.message : "无法读取 Windows 凭据库状态");
+    });
+    return () => {
+      active = false;
+    };
+  }, [aiPlatform, open]);
+
   if (!open) return null;
 
   const chosen = gainRecords.filter(({ paramId }) => selectedParamIds.includes(paramId));
@@ -101,7 +131,9 @@ export function AutoTuneWizard({
     : records.find(({ paramId }) => paramId === loop.targetParamId);
   const targetDenial = validateExperimentTargets(targetRecord, restValue, stepValue);
   const denial =
-    profile.role === "observer"
+    !aiPlatform.available
+      ? AI_DESKTOP_ONLY_MESSAGE
+      : profile.role === "observer"
       ? "仅观察者不能运行自动调参"
       : !profile.leaseActive
         ? "当前车辆控制权未激活"
@@ -109,15 +141,51 @@ export function AutoTuneWizard({
           ? "连接设备并同步参数后才能自动调参"
           : eligibleLoops.length === 0
             ? "当前车型没有可自动调参的控制环：需要可写的数值目标参数和反馈遥测通道"
-            : apiKey.trim().length === 0
-              ? "请先填写 DeepSeek API Key（只保存在本机）"
+            : !isSafeAiModel(model)
+              ? AI_MODEL_ERROR_MESSAGE
+              : credentialStatus === "checking"
+              ? "正在检查 Windows 凭据库…"
+              : credentialStatus === "error"
+                ? credentialMessage ?? "无法读取 Windows 凭据库状态"
+                : !credentialConfigured
+                  ? "请先保存 DeepSeek API Key 到 Windows 凭据库"
               : chosen.length === 0
                 ? "请至少勾选一个要整定的增益参数"
                 : targetDenial;
 
+  async function saveCredential() {
+    if (!aiPlatform.available || apiKey.length === 0) return;
+    setCredentialMessage(null);
+    try {
+      await aiPlatform.setApiKey(apiKey);
+      setApiKey("");
+      setCredentialConfigured(true);
+      setCredentialStatus("ready");
+      setCredentialMessage("API Key 已安全保存到 Windows 凭据库");
+    } catch (error) {
+      setCredentialStatus("error");
+      setCredentialMessage(error instanceof Error ? error.message : "保存 API Key 失败");
+    }
+  }
+
+  async function clearCredential() {
+    if (!aiPlatform.available) return;
+    setCredentialMessage(null);
+    try {
+      await aiPlatform.clearApiKey();
+      setApiKey("");
+      setCredentialConfigured(false);
+      setCredentialStatus("ready");
+      setCredentialMessage("已从 Windows 凭据库删除 API Key");
+    } catch (error) {
+      setCredentialStatus("error");
+      setCredentialMessage(error instanceof Error ? error.message : "删除 API Key 失败");
+    }
+  }
+
   async function start() {
     if (denial !== null || loop === undefined || loop.targetParamId === null) return;
-    settings.saveAiSettings(baseUrl, model, apiKey);
+    settings.saveAiModel(model);
     const controller = new AbortController();
     abortRef.current = controller;
     setLog([]);
@@ -202,7 +270,7 @@ export function AutoTuneWizard({
           {
             writeParam,
             runExperiment,
-            ai: new DeepSeekClient({ baseUrl, apiKey, model }),
+            ai: aiPlatform.createClient(model),
             onRound: (record) => setLog((previous) => [...previous, record]),
             isAborted: () => controller.signal.aborted,
             signal: controller.signal,
@@ -301,20 +369,43 @@ export function AutoTuneWizard({
           <div className="space-y-4 p-4">
             <section className="rounded-[var(--radius)] border border-(--border) p-3">
               <h3 className="m-0 text-sm">DeepSeek 连接</h3>
-              <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <div>
-                  <Label htmlFor="ai-key">API Key（仅本机保存）</Label>
-                  <Input id="ai-key" onChange={(event) => setApiKey(event.currentTarget.value)} type="password" value={apiKey} />
-                </div>
-                <div>
-                  <Label htmlFor="ai-model">模型</Label>
-                  <Input id="ai-model" onChange={(event) => setModel(event.currentTarget.value)} value={model} />
-                </div>
-                <div>
-                  <Label htmlFor="ai-url">Base URL</Label>
-                  <Input id="ai-url" onChange={(event) => setBaseUrl(event.currentTarget.value)} value={baseUrl} />
-                </div>
-              </div>
+              {!aiPlatform.available ? (
+                <p className="m-0 mt-2 text-xs text-(--warning)">{AI_DESKTOP_ONLY_MESSAGE}</p>
+              ) : (
+                <>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <Label htmlFor="ai-key">API Key（Windows 凭据库）</Label>
+                      <Input
+                        autoComplete="off"
+                        id="ai-key"
+                        onChange={(event) => setApiKey(event.currentTarget.value)}
+                        type="password"
+                        value={apiKey}
+                      />
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Button disabled={apiKey.length === 0} onClick={() => void saveCredential()} size="sm" variant="secondary">
+                          {credentialConfigured ? "替换 Key" : "保存 Key"}
+                        </Button>
+                        {credentialConfigured && (
+                          <Button onClick={() => void clearCredential()} size="sm" variant="secondary">删除 Key</Button>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <Label htmlFor="ai-model">模型</Label>
+                      <Input id="ai-model" maxLength={64} onChange={(event) => setModel(event.currentTarget.value)} value={model} />
+                    </div>
+                  </div>
+                  <p aria-live="polite" className="m-0 mt-2 text-xs text-(--text-muted)">
+                    {credentialMessage ?? (credentialStatus === "checking"
+                      ? "正在检查 Windows 凭据库…"
+                      : credentialConfigured
+                        ? "已配置 API Key；密钥不会返回前端。"
+                        : "尚未配置 API Key。")}
+                  </p>
+                </>
+              )}
             </section>
 
             <section className="rounded-[var(--radius)] border border-(--border) p-3">
