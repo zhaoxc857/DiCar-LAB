@@ -2,18 +2,18 @@
 
 面向电子设计大赛与智能车竞赛的无线调参、遥测和参数固化工作台。
 
-DiCar Tune 通过 DCTP v1 协议连接车辆，在桌面端集中完成参数读取、RAM 调参、Flash 固化、编码器标定、最多 8 路实时波形和链路诊断。当前版本为 **0.1.2**，优先支持 Windows 桌面 App，并提供可直接体验的内置模拟器。
+DiCar Tune 通过 DCTP v1 协议连接车辆，在桌面端集中完成参数读取、RAM 调参、Flash 固化、编码器标定、最多 8 路实时波形和链路诊断。当前版本为 **0.2.0**，优先支持 Windows 桌面 App，并提供可直接体验的内置模拟器。
 
 > 无线串口模块只负责透明传输。连接真实车辆时，车端 MCU 必须运行兼容的 DCTP 固件；仓库自带 C99 车端参考库（[firmware/dctp-device](firmware/dctp-device/README.md)），可直接移植到常见竞赛 MCU。
 
-## 下载 Windows 0.1.2
+## 下载 Windows 0.2.0
 
 | 版本 | 适用场景 | 下载 |
 | --- | --- | --- |
-| 安装版 | 日常使用，创建标准 Windows 安装 | [DiCar Tune 0.1.2 Setup](release/DiCar-Tune-0.1.2-Windows-x64-Setup.exe) |
-| 便携版 | 免安装测试，直接运行可执行文件 | [DiCar Tune 0.1.2 Portable](release/DiCar-Tune-0.1.2-Windows-x64-Portable.exe) |
+| 安装版 | 日常使用，创建标准 Windows 安装 | [DiCar Tune 0.2.0 Setup](release/DiCar-Tune-0.2.0-Windows-x64-Setup.exe) |
+| 便携版 | 免安装测试，直接运行可执行文件 | [DiCar Tune 0.2.0 Portable](release/DiCar-Tune-0.2.0-Windows-x64-Portable.exe) |
 
-两个版本都包含内置模拟器，不需要额外启动后台服务。发布文件尚未进行商业代码签名，Windows 首次运行时可能显示安全提示。
+两个版本都包含内置模拟器，不需要额外启动后台服务。发布文件尚未进行商业代码签名，Windows 首次运行时可能显示安全提示。完整校验值见 [SHA256SUMS.txt](release/SHA256SUMS.txt)。
 
 ## 5 分钟体验
 
@@ -90,4 +90,4 @@ pnpm dev
 
 ## 项目状态
 
-0.1.2 是可安装、可运行模拟器、可接入 Windows COM 的首个硬件兼容版本。项目仍处于首版迭代阶段，协议和核心状态管理已有自动化测试保障，但真实车辆接入前仍应先在断电、安全架起或低功率条件下验证参数范围与控制方向。
+0.2.0 在首个硬件兼容版本上增加安全桌面 AI 通道和本机原始波形记录/回放。项目仍处于早期迭代阶段，协议和核心状态管理已有自动化测试保障，但真实车辆接入前仍应先在断电、安全架起或低功率条件下验证参数范围与控制方向。

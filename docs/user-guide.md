@@ -1,6 +1,6 @@
 # DiCar Tune 用户手册
 
-本文面向使用 DiCar Tune 0.1.2 进行智能车或电子设计竞赛车辆调参的参赛者。建议先用内置模拟器熟悉工作流，再连接真实车辆。
+本文面向使用 DiCar Tune 0.2.0 进行智能车或电子设计竞赛车辆调参的参赛者。建议先用内置模拟器熟悉工作流，再连接真实车辆。
 
 > 安全提示：首次连接真实车辆前，请让驱动轮离地、限制 PWM/电流，并准备立即断电。参数写入 RAM 后可能立刻改变车辆行为。
 
@@ -8,14 +8,14 @@
 
 Windows 发布目录提供两个版本：
 
-- `DiCar-Tune-0.1.2-Windows-x64-Setup.exe`：标准安装版。
-- `DiCar-Tune-0.1.2-Windows-x64-Portable.exe`：便携版，直接运行。
+- `DiCar-Tune-0.2.0-Windows-x64-Setup.exe`：标准安装版。
+- `DiCar-Tune-0.2.0-Windows-x64-Portable.exe`：便携版，直接运行。
 
 两者功能相同，均包含内置模拟器。发布文件尚未进行商业代码签名，Windows 首次启动可能显示 SmartScreen 提示。请确认文件来自项目发布目录，并可用以下 SHA-256 核对：
 
 ```text
-Setup:    E349F511709CEB4854C3ABB2F0B9CCC9307649CE88FDA867FCAAE6C93D056EB3
-Portable: 2A46F473E0EE7E797EBA30F5EFD063D1E18C3A33788B211C242A46C5AAC71984
+Setup:    95D046B0373A957A8DF4D22D7806A6A5C44D8ACAC9BA145E02FBBDF1D1742094
+Portable: 91BCAA1CC6593AA0B137796D073A9F80489A0C696402E87429435AA8A6B7FFC9
 ```
 
 启动后顶部状态栏显示当前连接方式、端点和连接状态。只有完成 DCTP 握手、Manifest 加载和参数读取后，状态才会变为“已连接”。打开 COM 口本身不算连接成功。
@@ -32,7 +32,7 @@ Portable: 2A46F473E0EE7E797EBA30F5EFD063D1E18C3A33788B211C242A46C5AAC71984
 6. 点击“审阅并固化”查看 RAM/Flash 差异，再执行模拟固化。
 7. 点击“断开设备”结束会话。
 
-如果模拟器连接出现 Windows `10061` 拒绝连接错误，通常说明运行的是旧版或不完整副本。0.1.2 已将模拟器直接打包进 App，请重新下载当前版本。
+如果模拟器连接出现 Windows `10061` 拒绝连接错误，通常说明运行的是旧版或不完整副本。0.2.0 已将模拟器直接打包进 App，请重新下载当前版本。
 
 ## 3. 连接真实车辆前的准备
 

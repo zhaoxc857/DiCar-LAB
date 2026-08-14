@@ -1,6 +1,6 @@
 # DiCar Tune 开发文档
 
-本文说明 DiCar Tune 0.1.2 的代码边界、开发环境、质量门禁和 Windows 打包流程。使用说明见[用户手册](user-guide.md)。
+本文说明 DiCar Tune 0.2.0 的代码边界、开发环境、质量门禁和 Windows 打包流程。使用说明见[用户手册](user-guide.md)。
 
 ## 1. 架构
 
@@ -283,6 +283,14 @@ DCTP v1 vectors match
 在 Visual Studio x64 开发环境中执行：
 
 ```powershell
+pnpm --filter @dicar/desktop tauri:build
+```
+
+若 Windows Smart App Control 误拦 Cargo 生成的未签名 build script，不要关闭系统策略；
+可只改变可再生中间产物的哈希后重试，最终应用仍使用优化 release profile：
+
+```powershell
+$env:CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG = "1"
 pnpm --filter @dicar/desktop tauri:build
 ```
 

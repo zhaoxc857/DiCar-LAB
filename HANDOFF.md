@@ -2,8 +2,8 @@
 
 给新会话/新开发者的现状快照。读完本文 + 按需查阅引用文件，即可继续开发。
 
-- 当前实现分支：`codex/release-0.2.0`，从已验证基线 `3c556f0` 创建。规格提交 `b14495d`；安全 AI 提交 `938a101`、`354d019`；波形记录/回放提交 `443f4ce`、`8b43046`、`d3a699b`、`896144e`、`2a19f82`。
-- `release/` 当前仍是 0.1.2。0.2.0 软件功能已完成，**只剩完整门禁后的版本同步、Windows 构建、精确 PID/端口冒烟、SHA-256 和发布文件替换**。
+- 当前实现分支：`codex/release-0.2.0`，从已验证基线 `3c556f0` 创建。规格提交 `b14495d`；安全 AI 提交 `938a101`、`354d019`；波形记录/回放提交 `443f4ce`、`8b43046`、`d3a699b`、`896144e`、`2a19f82`；文档提交 `a83b47e`。
+- 0.2.0 已完成门禁、NSIS/便携版构建、精确 PID/回环端口冒烟和 SHA-256 校验。发布文件位于 `release/`，校验值见 `release/SHA256SUMS.txt`。
 - 权威规格：[docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md](docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md)（DCTP v1 协议与分阶段计划）。
 - 开发文档：[docs/development.md](docs/development.md)（架构、环境、门禁、打包）；用户手册：[docs/user-guide.md](docs/user-guide.md)。
 
@@ -50,9 +50,12 @@
 - schema v1 JSON 可导入导出；导入全量验证后单事务写入，重复 ID 重新生成。CSV 按采样时刻展开并防公式注入。
 - 回放使用独立只读 `TelemetryRingBuffer`，支持拖动、单步、0.25×/0.5×/1×/2×/4×和到尾暂停，不暂停设备、不替换实时 store、不发送 Bridge 命令。
 
-## 3. 发布前唯一未完成项
+## 3. 0.2.0 发布状态
 
-1. **打包 0.2.0**：先跑完整门禁，再同步四处版本号，构建 NSIS 与便携版；便携版必须通过精确 PID/回环监听端口冒烟，随后生成 SHA-256、更新发布文档并替换 `release/`。流程见 development.md §9。
+- `DiCar-Tune-0.2.0-Windows-x64-Setup.exe`：3,175,736 字节，SHA-256 `95D046B0373A957A8DF4D22D7806A6A5C44D8ACAC9BA145E02FBBDF1D1742094`。
+- `DiCar-Tune-0.2.0-Windows-x64-Portable.exe`：12,352,000 字节，SHA-256 `91BCAA1CC6593AA0B137796D073A9F80489A0C696402E87429435AA8A6B7FFC9`。
+- 便携版隐藏启动冒烟：精确 PID 33500 持续运行并拥有 `127.0.0.1:60547`，随后只终止该 PID并确认退出。
+- 两个 0.1.2 实体文件在 0.2.0 全部检查成功后移入 Windows 回收站；`release/` 现在只保留两个 0.2.0 产物和校验清单。
 
 参数方案导入明确不属于 0.2.0，也不再列入后续待办。云协作、无线烧录、实板移植与 macOS/Linux/移动端仍按第 1 节暂缓。
 
@@ -60,7 +63,8 @@
 
 - pnpm 全局可用；Node 26 兼容（`.node-version` 仅作推荐）；`git safe.directory` 已配置；MSVC 工具链可用（cc crate 编译 C 库依赖它）。
 - 前端门禁（在 `apps/dicar-desktop/` 或用 `--filter`）：`pnpm lint`、`pnpm typecheck`、`pnpm test -- --run`、`pnpm build`、`pnpm test:e2e`。最近基线为 39 个 Vitest 文件 / 171 个测试、8 个 Playwright 场景。
-- Rust 门禁（仓库根）：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace --all-targets`（含 C 交叉验证）、Tauri `native-check`、`cargo run -p dctp-sim --bin generate_vectors -- --check`（六个黄金向量）。
+- Rust 门禁（仓库根）：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（含 C 交叉验证）、Tauri `native-check`、`cargo run -p dctp-sim --bin generate_vectors -- --check`（六个黄金向量）。
+- 本机 Smart App Control 会误拦个别 Cargo 中间产物哈希；未关闭安全策略。测试目标用等价的包级命令补齐，向量检查使用 release profile，打包仅设置 `CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG=1` 改变 build script 哈希。
 - AI 覆盖使用内存凭据替身和本地 HTTP server；前端/Playwright 使用 Mock，不访问真实 DeepSeek。记录域使用 `fake-indexeddb` 覆盖原子导入、清理、失败回滚和容量边界。
 - 全绿是提交前提；rustfmt 对新 Rust 代码常需先 `cargo fmt --all`。
 
@@ -77,5 +81,5 @@
 
 1. 读本文件。
 2. `git log --oneline -15` 对照第 2 节确认基线未漂移。
-3. 按第 4 节跑完整门禁；全部通过后执行第 3 节的 0.2.0 发布流程。
+3. 0.2.0 已完成；从未完成清单中选择新需求前，先确认第 1 节裁剪仍有效。
 4. 如需改协议/C 库，先重读第 5 节和规格对应章节。
