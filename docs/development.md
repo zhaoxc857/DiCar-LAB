@@ -331,6 +331,8 @@ target/release/bundle/nsis/DiCar Tune_<version>_x64-setup.exe
 - 公共类型和 wire layout 的修改视为潜在 breaking change。
 - 保持 UI 只消费 bridge/store，不在组件中直接调用 Tauri API。
 - 不提交 `target/`、临时测试目录或已被替代的发布二进制。
+- 每个里程碑结束时检查旧发布物、临时输出、失效文档和被替代资产；先解析并核实精确路径，优先移入回收站或采用其他可恢复清理方式，不使用宽泛递归删除。
+- 新增产品能力仅限无线固件烧录；实体 nanoUART-wl/HC-05 验证必须等待用户确认硬件就绪。其他工作只完善现有功能与 UI。
 - 提交前运行与变更范围匹配的聚焦测试，并在最终阶段运行完整门禁。
 
 返回[项目 README](../README.md)或查看[用户手册](user-guide.md)。
