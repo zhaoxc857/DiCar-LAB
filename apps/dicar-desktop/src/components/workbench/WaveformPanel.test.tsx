@@ -145,10 +145,13 @@ it("moves a locked cursor to the retained boundary when its samples roll out", a
   fireEvent.click(canvas, { clientX: 200 });
 
   await act(async () => { bridge.advanceTelemetry(30_000); });
-  const retainedBoundaryUs = useWorkspaceStore.getState().buffer.first(200)?.timestampUs;
+  const retainedBoundaryUs = Math.min(...descriptors.slice(0, 8).flatMap(({ channelId }) => {
+    const point = useWorkspaceStore.getState().buffer.first(channelId);
+    return point === undefined ? [] : [point.timestampUs];
+  }));
 
   expect(await screen.findByText("游标数据已滚出缓冲，已移至最早样本")).toBeInTheDocument();
-  expect(retainedBoundaryUs).toBeTypeOf("number");
+  expect(Number.isFinite(retainedBoundaryUs)).toBe(true);
   expect(screen.getByRole("status", { name: "波形游标读数" })).toHaveTextContent(`游标 ${retainedBoundaryUs} µs`);
 });
 
