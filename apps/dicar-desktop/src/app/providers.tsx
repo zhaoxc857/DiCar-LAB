@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type PropsWithChildren } from "react";
+import { createContext, useContext, useState, useSyncExternalStore, type PropsWithChildren } from "react";
 import type { AiPlatform } from "../ai/aiPlatform";
 import { TauriAiPlatform, UnavailableAiPlatform } from "../ai/aiPlatform";
 import type { DesktopBridge } from "../bridge/desktopBridge";
@@ -73,6 +73,11 @@ export function useRecordingController(): RecordingController {
     throw new Error("useRecordingController 必须在 AppProviders 内使用");
   }
   return controller;
+}
+
+export function useRecordingControllerState() {
+  const controller = useRecordingController();
+  return useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
 }
 
 function createDefaultAiPlatform(): AiPlatform {

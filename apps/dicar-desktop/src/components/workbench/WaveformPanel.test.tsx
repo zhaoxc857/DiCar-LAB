@@ -1,9 +1,19 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { IDBFactory } from "fake-indexeddb";
 import { vi } from "vitest";
 import { AppProviders } from "../../app/providers";
 import { MockBridge } from "../../bridge/mockBridge";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { RecordingController } from "../../stores/recordingStore";
+import { RecordingRepository } from "../../telemetry/recordingRepository";
 import { WaveformPanel } from "./WaveformPanel";
+
+function isolatedRecordingController(): RecordingController {
+  return new RecordingController(new RecordingRepository({
+    indexedDb: new IDBFactory(),
+    databaseName: `waveform-recording-${crypto.randomUUID()}`,
+  }));
+}
 
 it("enforces eight channels and sends the 500 Hz subscription", async () => {
   const bridge = new MockBridge();
@@ -169,4 +179,69 @@ it("clears stale pending channels when a refreshed recommendation has no Manifes
   rerender(<AppProviders bridge={bridge}><WaveformPanel descriptors={changedManifest} selectionRequest={{ requestId: 2, label: "速度环推荐", channelIds: [] }} /></AppProviders>);
   expect(await screen.findByText("0/8 通道")).toBeInTheDocument();
   expect(screen.getByText("速度环推荐没有可用通道")).toBeInTheDocument();
+});
+
+it("starts and manually seals a named raw waveform recording from the toolbar", async () => {
+  const bridge = new MockBridge();
+  await bridge.connect({ kind: "simulator", address: "127.0.0.1:7100" });
+  const descriptors = (await bridge.getSnapshot()).telemetryDescriptors;
+  const recordingController = isolatedRecordingController();
+  render(
+    <AppProviders bridge={bridge} recordingController={recordingController}>
+      <WaveformPanel descriptors={descriptors} />
+    </AppProviders>,
+  );
+
+  fireEvent.click(await screen.findByRole("button", { name: "开始波形记录" }));
+  fireEvent.change(screen.getByLabelText("记录名称"), { target: { value: "速度阶跃" } });
+  fireEvent.change(screen.getByLabelText("记录备注"), { target: { value: "100 Hz baseline" } });
+  fireEvent.click(screen.getByRole("button", { name: "确认开始" }));
+  expect(await screen.findByText(/正在记录 · 速度阶跃/)).toBeInTheDocument();
+
+  await act(async () => { bridge.advanceTelemetry(10); });
+  fireEvent.click(screen.getByRole("button", { name: "停止波形记录" }));
+  expect(await screen.findByText("波形记录已保存")).toBeInTheDocument();
+  expect((await recordingController.listRecordings())[0]).toMatchObject({
+    name: "速度阶跃",
+    note: "100 Hz baseline",
+    status: "complete",
+    stopReason: "manual",
+  });
+});
+
+it("seals the active recording before applying a changed subscription", async () => {
+  const bridge = new MockBridge();
+  await bridge.connect({ kind: "simulator", address: "127.0.0.1:7100" });
+  const descriptors = (await bridge.getSnapshot()).telemetryDescriptors;
+  const recordingController = isolatedRecordingController();
+  recordingController.setSnapshot(await bridge.getSnapshot());
+  await recordingController.start({ name: "before change", note: "", vehicleProfileId: "generic-manifest" });
+  const stop = vi.spyOn(recordingController, "stop");
+  const apply = vi.spyOn(bridge, "setTelemetrySubscription");
+  render(
+    <AppProviders bridge={bridge} recordingController={recordingController}>
+      <WaveformPanel descriptors={descriptors} />
+    </AppProviders>,
+  );
+
+  fireEvent.click(await screen.findByRole("button", { name: "应用 500 Hz 订阅" }));
+  await waitFor(() => expect(apply).toHaveBeenCalled());
+  expect(stop).toHaveBeenCalledWith("subscriptionChanged");
+  expect(stop.mock.invocationCallOrder[0]).toBeLessThan(apply.mock.invocationCallOrder[0]!);
+  expect((await recordingController.listRecordings())[0]?.stopReason).toBe("subscriptionChanged");
+});
+
+it("keeps the start form open with an explicit denial when the device is not ready", async () => {
+  const bridge = new MockBridge();
+  const descriptors = (await bridge.getSnapshot()).telemetryDescriptors;
+  render(
+    <AppProviders bridge={bridge} recordingController={isolatedRecordingController()}>
+      <WaveformPanel descriptors={descriptors} />
+    </AppProviders>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "开始波形记录" }));
+  fireEvent.change(screen.getByLabelText("记录名称"), { target: { value: "not ready" } });
+  fireEvent.click(screen.getByRole("button", { name: "确认开始" }));
+  expect(await screen.findByText("设备就绪后才能开始录制")).toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "开始波形记录" })).toBeInTheDocument();
 });

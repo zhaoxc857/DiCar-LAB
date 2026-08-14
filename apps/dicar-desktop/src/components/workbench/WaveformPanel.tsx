@@ -1,20 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useDesktopBridge } from "../../app/providers";
+import { useDesktopBridge, useRecordingController, useRecordingControllerState } from "../../app/providers";
 import type { TelemetryDescriptor } from "../../domain/types";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { useVehicleProfileStore } from "../../stores/vehicleProfileStore";
 import { buildTelemetryWorkgroups, clipWorkgroup, mergeTelemetryWorkgroups, type TelemetryWorkgroup } from "../../telemetry/telemetryWorkgroups";
 import { advanceCursor, clampCursorsToBounds, clickCursor, computeChannelRange, type ChannelRange, type WaveformCursorState, type YScaleMode } from "../../telemetry/waveformInteraction";
 import { TelemetryDataTable } from "./TelemetryDataTable";
 import { TelemetryLegend } from "./TelemetryLegend";
 import { TelemetryToolbar } from "./TelemetryToolbar";
 import { WaveformCanvas } from "./WaveformCanvas";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
 
 export type WaveformSelectionRequest = { requestId: number; label: string; channelIds: number[] };
 
 export function WaveformPanel({ descriptors, selectionRequest = null, profileWorkgroups = [] }: { descriptors: TelemetryDescriptor[]; selectionRequest?: WaveformSelectionRequest | null; profileWorkgroups?: TelemetryWorkgroup[] }) {
   const bridge = useDesktopBridge();
+  const recordingController = useRecordingController();
+  const recordingState = useRecordingControllerState();
   const snapshot = useConnectionStore((state) => state.snapshot);
+  const vehicleProfileId = useVehicleProfileStore((state) => state.selectedProfileId);
   const buffer = useWorkspaceStore((state) => state.buffer);
   const visualRevision = useWorkspaceStore((state) => state.visualRevision);
   const [selectedIds, setSelectedIds] = useState(() => descriptors.slice(0, 8).map(({ channelId }) => channelId));
@@ -27,6 +34,11 @@ export function WaveformPanel({ descriptors, selectionRequest = null, profileWor
   const [fixedRanges, setFixedRanges] = useState<Record<number, ChannelRange>>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [startRecordingOpen, setStartRecordingOpen] = useState(false);
+  const [recordingName, setRecordingName] = useState("");
+  const [recordingNote, setRecordingNote] = useState("");
+  const [recordingBusy, setRecordingBusy] = useState(false);
+  const [recordingStartError, setRecordingStartError] = useState<string | null>(null);
   const lastConsumedRequestId = useRef<number | null>(null);
   const paused = snapshot?.paused ?? false;
   const maxChannels = snapshot?.linkBudget?.maxChannels ?? 8;
@@ -100,8 +112,53 @@ export function WaveformPanel({ descriptors, selectionRequest = null, profileWor
     setSelectedWorkgroup(id);
     setError(clipped.omittedCount > 0 ? `当前链路已保留 ${clipped.channelIds.length} 个通道，省略 ${clipped.omittedCount} 个` : null);
   }
-  async function applySubscription() { const result = await bridge.setTelemetrySubscription({ channelIds: selectedIds, sampleRateHz }); if (result.status === "failed") setError(result.message); else setError(null); }
-  async function togglePause() { const result = await bridge.setPaused(!paused); if (result.status === "failed") setError(result.message); }
+  async function applySubscription() {
+    if (recordingState.active !== null) {
+      try {
+        await recordingController.stop("subscriptionChanged");
+      } catch {
+        return;
+      }
+    }
+    const result = await bridge.setTelemetrySubscription({ channelIds: selectedIds, sampleRateHz });
+    if (result.status === "failed") setError(result.message); else setError(null);
+  }
+  async function togglePause() {
+    if (!paused && recordingState.active !== null) {
+      try {
+        await recordingController.stop("paused");
+      } catch {
+        return;
+      }
+    }
+    const result = await bridge.setPaused(!paused);
+    if (result.status === "failed") setError(result.message);
+  }
+  async function startRecording() {
+    if (snapshot !== null) recordingController.setSnapshot(snapshot);
+    setRecordingBusy(true);
+    setRecordingStartError(null);
+    try {
+      await recordingController.start({ name: recordingName, note: recordingNote, vehicleProfileId });
+      setStartRecordingOpen(false);
+      setRecordingName("");
+      setRecordingNote("");
+    } catch (reason) {
+      setRecordingStartError(reason instanceof Error ? reason.message : "无法开始波形记录");
+    } finally {
+      setRecordingBusy(false);
+    }
+  }
+  async function stopRecording() {
+    setRecordingBusy(true);
+    try {
+      await recordingController.stop("manual");
+    } catch {
+      setError("波形记录封存失败");
+    } finally {
+      setRecordingBusy(false);
+    }
+  }
   async function addMarker() { const active = cursors.activeCursor === "B" ? cursors.cursorBUs : cursors.cursorAUs; const timestampUs = active ?? probeTimestampUs ?? (selectedIds[0] === undefined ? undefined : buffer.latest(selectedIds[0])?.timestampUs); if (timestampUs === undefined || timestampUs === null) { setError("尚无可标记的遥测时刻"); return; } const result = await bridge.addMarker(`T+${Math.round(timestampUs)} µs`); if (result.status === "failed") setError(result.message); }
   function lockCursor(timestampUs: number) { setNotice(null); setCursors((state) => clickCursor(state, Math.round(timestampUs))); }
   function clearCursors() { setCursors({ cursorAUs: null, cursorBUs: null, activeCursor: "A" }); setProbeTimestampUs(null); setNotice(null); }
@@ -139,10 +196,12 @@ export function WaveformPanel({ descriptors, selectionRequest = null, profileWor
 
   return <section className="min-w-0 rounded-[var(--radius)] border border-(--border) bg-(--surface-raised) p-3">
     <header className="flex items-start justify-between gap-3"><div><h2 className="m-0 text-sm">实时波形</h2><p className="m-0 mt-1 text-[11px] text-(--text-muted)">有界 60 秒缓冲 · 像素极值降采样 · Canvas ≤30 Hz</p></div><span className="rounded border border-(--success) px-2 py-1 text-[10px] text-(--success)">{selectedIds.length}/{maxChannels} 通道</span></header>
-    <TelemetryToolbar descriptors={descriptors} error={error} hasCursors={cursors.cursorAUs !== null || cursors.cursorBUs !== null} linkReason={snapshot?.linkBudget?.reason ?? null} maxChannels={maxChannels} maxSampleRateHz={maxSampleRateHz} onApply={() => void applySubscription()} onClearCursors={clearCursors} onMarker={() => void addMarker()} onPause={() => void togglePause()} onResetFixedRanges={resetFixedRanges} onSampleRate={setSampleRateHz} onToggleChannel={toggleChannel} onWindow={setWindowSeconds} onWorkgroup={selectWorkgroup} onYScaleMode={changeScaleMode} paused={paused} sampleRateHz={sampleRateHz} selectedIds={selectedIds} selectedWorkgroup={selectedWorkgroup} windowSeconds={windowSeconds} workgroups={workgroups} yScaleMode={yScaleMode} />
+    <TelemetryToolbar descriptors={descriptors} error={error ?? recordingState.error} hasCursors={cursors.cursorAUs !== null || cursors.cursorBUs !== null} linkReason={snapshot?.linkBudget?.reason ?? null} maxChannels={maxChannels} maxSampleRateHz={maxSampleRateHz} onApply={() => void applySubscription()} onClearCursors={clearCursors} onMarker={() => void addMarker()} onPause={() => void togglePause()} onResetFixedRanges={resetFixedRanges} onSampleRate={setSampleRateHz} onStartRecording={() => { setRecordingStartError(null); setStartRecordingOpen(true); }} onStopRecording={() => void stopRecording()} onToggleChannel={toggleChannel} onWindow={setWindowSeconds} onWorkgroup={selectWorkgroup} onYScaleMode={changeScaleMode} paused={paused} recordingActive={recordingState.active !== null} recordingName={recordingState.active?.name ?? null} sampleRateHz={sampleRateHz} selectedIds={selectedIds} selectedWorkgroup={selectedWorkgroup} windowSeconds={windowSeconds} workgroups={workgroups} yScaleMode={yScaleMode} />
+    {recordingState.notice !== null && <p aria-live="polite" className="m-0 mt-2 text-[10px] text-(--success)">{recordingState.notice}</p>}
     <div aria-label="实时波形交互区" className="mt-3 overflow-hidden rounded border border-(--border) bg-(--background) focus-visible:outline" onKeyDown={onKeyDown} role="region" tabIndex={0}><WaveformCanvas buffer={buffer} cursorAUs={cursors.cursorAUs} cursorBUs={cursors.cursorBUs} descriptors={selectedDescriptors} fixedRanges={fixedRanges} onLockCursor={lockCursor} onProbe={setProbeTimestampUs} paused={paused} probeTimestampUs={probeTimestampUs} selectedIds={selectedIds} visualRevision={visualRevision} windowSeconds={windowSeconds} yScaleMode={yScaleMode} /></div>
     {notice ? <p aria-live="polite" className="m-0 mt-2 text-[10px] text-(--warning)">{notice}</p> : null}
     <TelemetryLegend buffer={buffer} descriptors={descriptors} selectedIds={selectedIds} targetTimestampUs={targetTimestampUs} />
     <TelemetryDataTable activeCursor={cursors.activeCursor} buffer={buffer} cursorAUs={cursors.cursorAUs} cursorBUs={cursors.cursorBUs} descriptors={descriptors} paused={paused} probeTimestampUs={probeTimestampUs} selectedIds={selectedIds} />
+    {startRecordingOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"><section aria-labelledby="start-recording-title" aria-modal="true" className="w-full max-w-md rounded-[var(--radius)] border border-(--border) bg-(--surface-raised) p-4 shadow-2xl" role="dialog"><h3 className="m-0 text-base" id="start-recording-title">开始波形记录</h3><p className="m-0 mt-1 text-xs text-(--text-muted)">保存原始遥测批次，最长 5 分钟。暂停、断线或订阅变化会自动封存。</p><div className="mt-4 space-y-3"><div><Label htmlFor="recording-name">记录名称</Label><Input autoFocus id="recording-name" maxLength={64} onChange={(event) => setRecordingName(event.currentTarget.value)} value={recordingName} /></div><div><Label htmlFor="recording-note">记录备注</Label><textarea className="min-h-20 w-full rounded-[var(--radius)] border border-(--border) bg-(--background) p-3 text-sm text-(--text)" id="recording-note" maxLength={256} onChange={(event) => setRecordingNote(event.currentTarget.value)} value={recordingNote} /></div></div>{recordingStartError !== null && <p aria-live="assertive" className="m-0 mt-3 text-xs text-(--danger)">{recordingStartError}</p>}<div className="mt-4 flex justify-end gap-2"><Button disabled={recordingBusy} onClick={() => setStartRecordingOpen(false)} size="sm" variant="secondary">取消</Button><Button disabled={recordingBusy} onClick={() => void startRecording()} size="sm">确认开始</Button></div></section></div>}
   </section>;
 }
