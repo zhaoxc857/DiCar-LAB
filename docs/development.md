@@ -7,7 +7,13 @@
 ```mermaid
 flowchart LR
     UI["React 工作区"] --> Bridge["DesktopBridge 接口"]
+    UI --> AiPlatform["AiPlatform"]
+    UI --> Recorder["RecordingController"]
     Bridge --> Tauri["Tauri Commands / Events"]
+    AiPlatform --> AiService["Tauri AI Service"]
+    AiService --> Credential["Windows Credential Manager"]
+    AiService --> DeepSeek["固定 DeepSeek HTTPS"]
+    Recorder --> IndexedDB["原始批次 IndexedDB"]
     Tauri --> Actor["dicar-app-core AppActor"]
     Actor --> Session["DCTP ProtocolSession"]
     Session --> Serial["Windows COM / HC-05 / nanoUART-wl"]
@@ -19,6 +25,8 @@ flowchart LR
 - React 只消费快照和桥接事件，不直接打开串口或构造 DCTP 帧。
 - 车辆 YAML 只把 Manifest 的精确 `machine_name` 解析成任务；resolver 输出稳定的 `paramId`/`channelId`，不修改设备 DTO。
 - Tauri 层负责类型化命令、事件转发、串口发现和内置模拟器生命周期。
+- 独立 `AiPlatform` 把 React 与 Tauri AI command 隔离；Rust AI service 独占凭据、HTTP、限制和取消，Key 不进入前端状态。
+- `RecordingController` 在唯一 Bridge 事件入口先复制原始遥测批次，再交给实时绘图 store；IndexedDB 和回放不修改 DCTP wire 或设备状态。
 - `dicar-app-core` 负责单线程 AppActor、会话、权限策略、参数工作区、链路预算和遥测缓冲。
 - `dctp-protocol` 只负责 DCTP v1 编解码和 payload 模型，不执行 IO。
 - `dctp-sim` 是确定性的 TCP 设备模拟器，用于协议、参数、遥测和桌面集成测试。
@@ -112,6 +120,7 @@ http://127.0.0.1:5173/
 ```
 
 Web 预览默认提供确定性模拟体验。支持 Web Serial 的 Chromium 浏览器可以授权和识别 USB 串口，但真实 DCTP 会话仍应使用 Windows 桌面 App。
+Web 预览不启用 AI，也不接受或保存 DeepSeek Key；只有 Tauri Windows 桌面壳会创建可用的 `AiPlatform`。
 
 ## 5. 运行模拟器
 
@@ -158,6 +167,46 @@ Serial { portName, baudRate, hardwareProfile }
 - `hc05BluetoothSpp`
 - `genericSerial`
 
+### 安全 AI 桌面通道
+
+`apps/dicar-desktop/src-tauri/src/ai_service.rs` 是与设备 `AppState` 分离的服务。
+它固定请求 `https://api.deepseek.com/chat/completions`，禁止重定向，连接/总超时
+分别为 10/60 秒，并以流方式把响应限制在 1 MiB。模型名只接受 1–64 个安全
+ASCII 字符。每个请求使用前端生成的 UUID 和 `CancellationToken` 注册；
+`ai_cancel` 会真正终止 Rust Future，RAII guard 负责所有正常、错误和 Future
+drop 路径的请求表清理。
+
+凭据适配使用精确 `keyring 3.6.3` 的 `windows-native` 后端，服务/用户为
+`com.dicar.tune` / `deepseek-api-key`。Tauri 注册以下命令：
+
+- `ai_credential_status`
+- `ai_set_api_key`
+- `ai_clear_api_key`
+- `ai_complete`
+- `ai_cancel`
+
+前端 `settingsStore` schema v3 只保存 `aiModel`，迁移在 Zustand hydration 前
+直接清除旧 `aiBaseUrl`/`aiApiKey`。React 只消费 `AiPlatform`，不直接 import
+Tauri invoke。Rust 测试用内存凭据替身和本地 HTTP server，自动化不访问真实
+DeepSeek。
+
+### 原始波形记录与回放
+
+`useBridgeSubscription` 是唯一事件扇出。它先调用 `RecordingController.acceptEvent`
+（同步深拷贝事件并进入单一 Promise 队列），再更新连接和 60 秒绘图 store。
+记录仓储使用原生 IndexedDB `dicar-tune-recordings` v1：
+
+- `recordings` 以记录 UUID 保存元数据；
+- `recordingChunks` 用 `[recordingId, chunkIndex]` 复合主键保存完整 `UiTelemetryBatch`，并按 `recordingId` 建索引；
+- 时间跨度达到 1 秒或累计 4096 点时写块；单次 5 分钟，库上限 20 条 / 256 MiB；
+- 所有写入串行；写失败删除整条活动记录，启动时删除所有非 complete 记录；
+- 导入先做 schema v1 全量验证，再在单个事务内写元数据和全部块；清理旧记录也与导入处于同一事务。
+
+JSON 保存元数据和原始批次；CSV 是按采样时刻展开的宽表并处理公式注入。
+导出和回放用引用计数保护记录不被容量清理。回放把完整记录加载进独立
+`TelemetryRingBuffer`，只向 `WaveformCanvas` 传显式 `viewportEndUs`；它不读取
+实时 store，也不调用 `DesktopBridge`。
+
 ## 7. 质量门禁
 
 ### 前端
@@ -170,7 +219,7 @@ pnpm build
 pnpm test:e2e
 ```
 
-覆盖范围包括 bridge 合同、车辆 YAML 安全边界、Manifest 兼容解析、配置持久化、任务工作区、连接栏、参数编辑、参数方案（保存/差异应用/固化记录）、编码器、波形、权限、首页到工作台流程和 HC-05 说明。
+覆盖范围包括 bridge 合同、车辆 YAML 安全边界、Manifest 兼容解析、配置持久化、任务工作区、连接栏、参数编辑、参数方案（保存/差异应用/固化记录）、安全 AI command/取消/凭据迁移、原始记录分块/限额/原子导入、独立回放、编码器、波形、权限、首页到工作台流程和 HC-05 说明。Playwright 使用 Mock 验证录制、订阅变化封存、回放和 JSON/CSV 下载，不调用真实 DeepSeek。
 
 ### Rust workspace
 

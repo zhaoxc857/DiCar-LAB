@@ -135,6 +135,18 @@ u32 crc32                覆盖 magic..payload（CRC-32/ISO-HDLC）
 6. 参数/通道描述表与车型 YAML 里的 `machine_name` 精确一致（区分大小写）。
 7. 用桌面端"模拟器体验"先熟悉流程，再切"真实串口"接入你的车。
 
+### AI 调参额外要求
+
+要让桌面版 AI 向导能够运行阶跃实验，车端除了增益参数和反馈遥测，还必须把
+控制目标（例如目标速度）暴露为**可写数值参数**。建议给目标参数设置
+`DCTP_PARAM_DANGEROUS`，提醒操作者它会立即改变车辆行为；同时不要设置
+`DCTP_PARAM_PERSISTENT`，避免实验激励进入 Flash 待固化集合。
+
+车型 YAML 的 `control_loops[].target_parameter`、`gains` 和
+`telemetry.feedback` 都按区分大小写的完整 `machine_name` 绑定。参数表、遥测
+通道表和 YAML 中任一名称不一致，向导都会拒绝启动，不会退回显示名猜测绑定。
+AI 仍只写 RAM；稳定结果是否固化到 Flash 必须由操作者人工审阅确认。
+
 ## 6. 与仓库测试的关系
 
 `crates/dctp-device-c` 把本目录的 C 源编译进 Rust 测试并做两类校验：
