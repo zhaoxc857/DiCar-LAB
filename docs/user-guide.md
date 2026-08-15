@@ -16,8 +16,8 @@ Windows 发布目录提供两个版本：
 两者功能相同，均包含内置模拟器。发布文件尚未进行商业代码签名，Windows 首次启动可能显示 SmartScreen 提示。请确认文件来自项目发布目录，并可用以下 SHA-256 核对：
 
 ```text
-Setup:    30608FF384F05CCA2C2AF58BE0A06FAA22EB19EB22DDA56390DCDC267A24EDEF
-Portable: BBB333A5372A5405D5E9B19D521EF46D503DCE3480B360C4FB899978E11337F7
+Setup:    AF9EE8F6F8C701C7178FC701A313AC2380A1FA12AE3594A16D7E0B5B51C5A6B1
+Portable: 67F1643C313BA445F8B148ED78F8438C06607C2A61C4983943A94BA2939DBBA5
 ```
 
 启动后顶部设备状态芯片显示端点和连接状态。点击芯片会打开“设备连接”抽屉，其中包含连接、硬件指南、偏好和设备固件状态。只有完成 DCTP 握手、Manifest 加载和参数读取后，状态才会变为“已就绪”；打开 COM 口本身不算连接成功。

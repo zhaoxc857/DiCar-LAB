@@ -2,9 +2,9 @@
 
 给新会话/新开发者的现状快照。读完本文 + 按需查阅引用文件，即可继续开发。
 
-- 当前实现分支：`codex/release-0.2.0`，从已验证基线 `3c556f0` 创建。规格提交 `b14495d`；安全 AI 提交 `938a101`、`354d019`；波形记录/回放提交 `443f4ce`、`8b43046`、`d3a699b`、`896144e`、`2a19f82`；精准控制台 UI 设计/计划提交 `42b5687`、`38d58e9`，实施与文档提交 `ebacc2a`、`b23a941`、`07a7d34`、`184b4c0`、`6e90766`、`0239e76`、`94ba3dd`、`6d9cc02`、`9580fe6`。
+- 当前实现分支：`codex/release-0.2.0`，从已验证基线 `3c556f0` 创建。规格提交 `b14495d`；安全 AI 提交 `938a101`、`354d019`；波形记录/回放提交 `443f4ce`、`8b43046`、`d3a699b`、`896144e`、`2a19f82`；精准控制台 UI 设计/计划提交 `42b5687`、`38d58e9`，实施与文档提交 `ebacc2a`、`b23a941`、`07a7d34`、`184b4c0`、`6e90766`、`0239e76`、`94ba3dd`、`6d9cc02`、`9580fe6`；旧首页/新工作台兼容提交 `b726327`。
 - 0.2.0 已完成门禁、NSIS/便携版构建、精确 PID/回环端口冒烟和 SHA-256 校验。发布文件位于 `release/`，校验值见 `release/SHA256SUMS.txt`。
-- 0.2.0 安装版与便携版已于 2026-08-15 重新构建并同步精准控制台 UI；本次未修改版本号、Rust/Tauri 后端逻辑、DCTP wire、消息 ID 或黄金向量。
+- 0.2.0 安装版与便携版已于 2026-08-15 重新构建并同步旧首页四入口与精准控制台工作台；本次未修改版本号、Rust/Tauri 后端逻辑、DCTP wire、消息 ID 或黄金向量。
 - 权威规格：[docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md](docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md)（DCTP v1 协议与分阶段计划）。
 - 开发文档：[docs/development.md](docs/development.md)（架构、环境、门禁、打包）；用户手册：[docs/user-guide.md](docs/user-guide.md)。
 
