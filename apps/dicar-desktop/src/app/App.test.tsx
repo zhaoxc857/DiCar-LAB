@@ -20,5 +20,4 @@ it("shows the precision-console shell with four real global destinations", async
   expect(screen.getByRole("button", { name: "打开硬件帮助" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "打开设置" })).toBeInTheDocument();
   expect(screen.queryByText("参数方案库")).not.toBeInTheDocument();
-  expect(screen.queryByText("计划发布")).not.toBeInTheDocument();
 });

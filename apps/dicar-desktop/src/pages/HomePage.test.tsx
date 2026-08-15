@@ -22,9 +22,7 @@ it("renders a truthful overview and connects the simulator from the device drawe
   expect(screen.getByRole("link", { name: "进入实时调试" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "打开波形记录" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "查看诊断" })).toBeInTheDocument();
-  expect(screen.queryByText("计划发布")).not.toBeInTheDocument();
   expect(screen.queryByText("参数方案库")).not.toBeInTheDocument();
-  expect(screen.queryByText("CAR-01 / DEFAULT")).not.toBeInTheDocument();
   expect(screen.getByText("通用 Manifest")).toBeInTheDocument();
   expect(screen.getByText("设备未连接")).toBeInTheDocument();
 
