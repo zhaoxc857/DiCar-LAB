@@ -10,6 +10,7 @@ import { ParameterEditor } from "../components/workbench/ParameterEditor";
 import { ParameterNav } from "../components/workbench/ParameterNav";
 import { SnapshotManagerDialog } from "../components/workbench/SnapshotManagerDialog";
 import { TypedParameterControl } from "../components/workbench/TypedParameterControl";
+import { TelemetryStrip } from "../components/workbench/TelemetryStrip";
 import { WaveformPanel } from "../components/workbench/WaveformPanel";
 import type { WaveformSelectionRequest } from "../components/workbench/WaveformPanel";
 import { WorkbenchContextActions } from "../components/workbench/WorkbenchContextActions";
@@ -94,6 +95,7 @@ export function LiveWorkbenchPage() {
 
   return <main className="w-full px-3 py-4 lg:px-5" id="main-content">
     <header className="mb-4 flex flex-wrap items-end justify-between gap-3"><div className="flex items-center gap-3"><WaveSine className="text-(--interactive)" size={28} /><div><h1 className="m-0 text-xl">实时调参与波形</h1><p className="m-0 mt-1 text-xs text-(--text-muted)">{workspace.displayName} · {records.length} 个设备参数 · {telemetry.length} 个遥测通道</p></div></div><div className="flex flex-wrap items-center justify-end gap-2"><WorkbenchModeSwitch /><WorkbenchContextActions onOpenAutoTune={() => setAutoTuneOpen(true)} onOpenSnapshots={() => setSnapshotsOpen(true)} revision={snapshot?.revision ?? 0} /></div></header>
+    <TelemetryStrip buffer={buffer} descriptors={telemetry} loop={selectedLoop} records={records} snapshot={snapshot} />
     <LeasePanel />
     <WorkbenchLayout
       editor={<TaskEditor buffer={buffer} records={records} selectedGroup={selectedGroup} selectedRecord={selectedRecord} task={selectedTask} telemetry={telemetry} workspace={workspace} />}

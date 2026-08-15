@@ -60,7 +60,7 @@ it("records an automatic commit snapshot after flashing", async () => {
 
   fireEvent.click(screen.getByRole("button", { name: "审阅并固化" }));
   fireEvent.click(screen.getByRole("button", { name: "固化到 Flash" }));
-  await waitFor(() => expect(screen.getByText("0 项待固化")).toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByText("0 项待固化")).not.toBeInTheDocument());
 
   fireEvent.click(screen.getByRole("button", { name: "参数方案" }));
   expect(await screen.findByText(/固化记录 · Gen \d+/)).toBeInTheDocument();

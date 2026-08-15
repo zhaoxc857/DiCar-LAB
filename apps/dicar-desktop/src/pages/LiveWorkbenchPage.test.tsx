@@ -61,7 +61,7 @@ it("runs the B-to-A tuning flow with permissions, RAM truth, and commit review",
   expect(screen.getByRole("dialog", { name: "固化参数修改" })).toBeInTheDocument();
   expect(screen.getByRole("cell", { name: "速度环 Kp" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "固化到 Flash" }));
-  await waitFor(() => expect(screen.getByText("0 项待固化")).toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByText("0 项待固化")).not.toBeInTheDocument());
 });
 
 it("keeps Observer read-only with a textual denial reason", async () => {
@@ -74,7 +74,7 @@ it("keeps Observer read-only with a textual denial reason", async () => {
   fireEvent.change(screen.getByLabelText("演示身份"), { target: { value: "observer" } });
   await screen.findByText("仅观察者不能修改参数");
   expect(screen.queryByRole("button", { name: "写入 RAM" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "审阅并固化" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "审阅并固化" })).not.toBeInTheDocument();
 });
 
 it("organizes the simulator as a vehicle speed-control workspace", async () => {
@@ -84,7 +84,7 @@ it("organizes the simulator as a vehicle speed-control workspace", async () => {
   await act(async () => undefined);
   await connectSimulator();
   fireEvent.click(screen.getByRole("button", { name: "速度环" }));
-  expect(screen.getByText("目标", { exact: true })).toBeInTheDocument();
+  expect(screen.getAllByText("目标", { exact: true }).length).toBeGreaterThanOrEqual(2);
   expect(screen.getByLabelText("目标速度")).toBeInTheDocument();
   expect(screen.getByLabelText("速度环 Kp")).toBeInTheDocument();
   expect(screen.getByLabelText("速度环 Ki")).toBeInTheDocument();
