@@ -18,11 +18,16 @@ it("shows live snapshot identity and link diagnostics with text labels", async (
   expect(screen.getByRole("dialog", { name: "设备连接" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
   expect((await screen.findAllByText("TCP 127.0.0.1:7100")).length).toBeGreaterThanOrEqual(2);
+  fireEvent.click(screen.getByRole("button", { name: "关闭设备连接" }));
   expect(screen.getByText("0x44aa0001")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "设备健康" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "连接质量" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "协议事件" })).toBeInTheDocument();
   expect(screen.getByText("接收字节")).toBeInTheDocument();
   expect(screen.getByText("CRC 错误")).toBeInTheDocument();
   expect(screen.getByText("设备丢样")).toBeInTheDocument();
   expect(screen.getByText("UI 丢批次")).toBeInTheDocument();
+  expect(screen.getByText("直接来自设备与 AppActor 快照")).toBeInTheDocument();
   expect(screen.getByText("遥测安全上限")).toBeInTheDocument();
   expect(screen.getByText("8 通道 × 500 Hz")).toBeInTheDocument();
 });
