@@ -1,8 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { App } from "../../app/App";
 import { AppProviders } from "../../app/providers";
 import { MockBridge } from "../../bridge/mockBridge";
 import type { SerialPortDescriptor } from "../../domain/types";
-import { ConnectionStatusBar } from "./ConnectionStatusBar";
 
 class HardwareBridge extends MockBridge {
   override async listSerialPorts(): Promise<SerialPortDescriptor[]> {
@@ -16,13 +16,16 @@ class HardwareBridge extends MockBridge {
   }
 }
 
-it("shows HC-05 pairing, outgoing COM, and 3.3V guidance before connecting", async () => {
+it("opens all existing connection controls from the compact device chip", async () => {
   render(
     <AppProviders bridge={new HardwareBridge()}>
-      <ConnectionStatusBar />
+      <App />
     </AppProviders>,
   );
   await act(async () => undefined);
+
+  fireEvent.click(screen.getByRole("button", { name: /未连接.*打开设备连接/ }));
+  expect(screen.getByRole("dialog", { name: "设备连接" })).toBeInTheDocument();
 
   fireEvent.change(screen.getByRole("combobox", { name: "连接方式" }), {
     target: { value: "serial" },
@@ -32,9 +35,9 @@ it("shows HC-05 pairing, outgoing COM, and 3.3V guidance before connecting", asy
   fireEvent.change(screen.getByRole("combobox", { name: "硬件类型" }), {
     target: { value: "hc05BluetoothSpp" },
   });
+  fireEvent.click(screen.getByRole("button", { name: "硬件指南" }));
 
   expect(screen.getByText(/Windows 蓝牙设置中完成配对/)).toBeInTheDocument();
   expect(screen.getByText(/传出（Outgoing）COM/)).toBeInTheDocument();
   expect(screen.getByText(/3.3V 逻辑/)).toBeInTheDocument();
-  expect(screen.getByRole("option", { name: "自动探测" })).toBeInTheDocument();
 });
