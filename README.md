@@ -13,7 +13,7 @@ DiCar Tune 通过 DCTP v1 协议连接车辆，在桌面端集中完成参数读
 | 安装版 | 日常使用，创建标准 Windows 安装 | [DiCar Tune 0.2.0 Setup](release/DiCar-Tune-0.2.0-Windows-x64-Setup.exe) |
 | 便携版 | 免安装测试，直接运行可执行文件 | [DiCar Tune 0.2.0 Portable](release/DiCar-Tune-0.2.0-Windows-x64-Portable.exe) |
 
-两个版本都包含内置模拟器，不需要额外启动后台服务。发布文件尚未进行商业代码签名，Windows 首次运行时可能显示安全提示。完整校验值见 [SHA256SUMS.txt](release/SHA256SUMS.txt)。
+两个版本都包含内置模拟器和精准控制台界面，不需要额外启动后台服务。发布文件尚未进行商业代码签名，Windows 首次运行时可能显示安全提示。完整校验值见 [SHA256SUMS.txt](release/SHA256SUMS.txt)。
 
 ## 5 分钟体验
 

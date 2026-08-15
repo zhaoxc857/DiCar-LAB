@@ -2,9 +2,9 @@
 
 给新会话/新开发者的现状快照。读完本文 + 按需查阅引用文件，即可继续开发。
 
-- 当前实现分支：`codex/release-0.2.0`，从已验证基线 `3c556f0` 创建。规格提交 `b14495d`；安全 AI 提交 `938a101`、`354d019`；波形记录/回放提交 `443f4ce`、`8b43046`、`d3a699b`、`896144e`、`2a19f82`；精准控制台 UI 设计/计划提交 `42b5687`、`38d58e9`，实施提交 `ebacc2a`、`b23a941`、`07a7d34`、`184b4c0`、`6e90766`、`0239e76`、`94ba3dd`、`6d9cc02`。
+- 当前实现分支：`codex/release-0.2.0`，从已验证基线 `3c556f0` 创建。规格提交 `b14495d`；安全 AI 提交 `938a101`、`354d019`；波形记录/回放提交 `443f4ce`、`8b43046`、`d3a699b`、`896144e`、`2a19f82`；精准控制台 UI 设计/计划提交 `42b5687`、`38d58e9`，实施与文档提交 `ebacc2a`、`b23a941`、`07a7d34`、`184b4c0`、`6e90766`、`0239e76`、`94ba3dd`、`6d9cc02`、`9580fe6`。
 - 0.2.0 已完成门禁、NSIS/便携版构建、精确 PID/回环端口冒烟和 SHA-256 校验。发布文件位于 `release/`，校验值见 `release/SHA256SUMS.txt`。
-- 精准控制台 UI 是上述 0.2.0 二进制构建后的纯前端改进；本阶段没有重新打包或替换 `release/` 文件。下次发布必须重新执行完整门禁、构建、启动和 SHA-256 流程。
+- 0.2.0 安装版与便携版已于 2026-08-15 重新构建并同步精准控制台 UI；本次未修改版本号、Rust/Tauri 后端逻辑、DCTP wire、消息 ID 或黄金向量。
 - 权威规格：[docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md](docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md)（DCTP v1 协议与分阶段计划）。
 - 开发文档：[docs/development.md](docs/development.md)（架构、环境、门禁、打包）；用户手册：[docs/user-guide.md](docs/user-guide.md)。
 
@@ -66,9 +66,9 @@
 
 ## 3. 0.2.0 发布状态
 
-- `DiCar-Tune-0.2.0-Windows-x64-Setup.exe`：3,175,736 字节，SHA-256 `95D046B0373A957A8DF4D22D7806A6A5C44D8ACAC9BA145E02FBBDF1D1742094`。
-- `DiCar-Tune-0.2.0-Windows-x64-Portable.exe`：12,352,000 字节，SHA-256 `91BCAA1CC6593AA0B137796D073A9F80489A0C696402E87429435AA8A6B7FFC9`。
-- 便携版隐藏启动冒烟：精确 PID 33500 持续运行并拥有 `127.0.0.1:60547`，随后只终止该 PID并确认退出。
+- `DiCar-Tune-0.2.0-Windows-x64-Setup.exe`：3,181,621 字节，SHA-256 `30608FF384F05CCA2C2AF58BE0A06FAA22EB19EB22DDA56390DCDC267A24EDEF`。
+- `DiCar-Tune-0.2.0-Windows-x64-Portable.exe`：12,360,192 字节，SHA-256 `BBB333A5372A5405D5E9B19D521EF46D503DCE3480B360C4FB899978E11337F7`。
+- 最终 `release/` 便携版隐藏启动冒烟：精确 PID 3336 持续响应并拥有 `127.0.0.1:63056`，随后只终止该 PID并确认退出。
 - 两个 0.1.2 实体文件在 0.2.0 全部检查成功后移入 Windows 回收站；`release/` 现在只保留两个 0.2.0 产物和校验清单。
 
 参数方案导入明确不属于 0.2.0，也不再列入后续待办。无线烧录是下一项开发；nanoUART-wl/HC-05 实板验证必须等用户确认硬件就绪。云协作、macOS/Linux/移动端等仍不在范围内。
