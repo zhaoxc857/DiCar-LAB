@@ -18,7 +18,7 @@ import { ConnectionStatusChip } from "./ConnectionStatusChip";
 
 const destinations: Array<{ icon: Icon; label: string; to: string; end?: boolean }> = [
   { icon: House, label: "概览", to: "/", end: true },
-  { icon: SlidersHorizontal, label: "实时调试", to: "/live/car-01" },
+  { icon: SlidersHorizontal, label: "实时调试", to: "/live" },
   { icon: Database, label: "波形记录", to: "/records" },
   { icon: Pulse, label: "诊断", to: "/diagnostics" },
 ];

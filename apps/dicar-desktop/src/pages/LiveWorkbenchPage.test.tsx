@@ -6,6 +6,14 @@ import { useVehicleProfileStore } from "../stores/vehicleProfileStore";
 
 beforeEach(() => useVehicleProfileStore.getState().reset());
 
+async function connectSimulator() {
+  fireEvent.click(screen.getByRole("button", { name: /打开设备连接/ }));
+  expect(screen.getByRole("dialog", { name: "设备连接" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
+  expect((await screen.findAllByText("已就绪")).length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole("button", { name: "关闭设备连接" }));
+}
+
 it("runs the B-to-A tuning flow with permissions, RAM truth, and commit review", async () => {
   window.history.pushState({}, "", "/live/car-01");
   const bridge = new MockBridge();
@@ -20,8 +28,7 @@ it("runs the B-to-A tuning flow with permissions, RAM truth, and commit review",
   fireEvent.click(screen.getByRole("button", { name: "关闭波形记录库" }));
   expect(screen.getByText("本地演示权限，不是远程安全边界")).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
-  expect(await screen.findByText("已就绪")).toBeInTheDocument();
+  await connectSimulator();
   expect(screen.getByText(/19 个设备参数/)).toBeInTheDocument();
   expect(screen.getByText("8/8 通道")).toBeInTheDocument();
 
@@ -42,8 +49,7 @@ it("keeps Observer read-only with a textual denial reason", async () => {
   const bridge = new MockBridge();
   render(<AppProviders bridge={bridge}><App /></AppProviders>);
   await act(async () => undefined);
-  fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
-  await screen.findByText("已就绪");
+  await connectSimulator();
 
   fireEvent.change(screen.getByLabelText("演示身份"), { target: { value: "observer" } });
   await screen.findByText("仅观察者不能修改参数");
@@ -56,8 +62,7 @@ it("organizes the simulator as a vehicle speed-control workspace", async () => {
   window.history.pushState({}, "", "/live/car-01");
   render(<AppProviders bridge={new MockBridge()}><App /></AppProviders>);
   await act(async () => undefined);
-  fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
-  await screen.findByText("已就绪");
+  await connectSimulator();
   fireEvent.click(screen.getByRole("button", { name: "速度环" }));
   expect(screen.getByText("目标", { exact: true })).toBeInTheDocument();
   expect(screen.getByLabelText("目标速度")).toBeInTheDocument();

@@ -62,8 +62,10 @@ async function openWizard(bridge = new MockBridge(), aiPlatform: AiPlatform = ne
   window.history.pushState({}, "", "/live/car-01");
   render(<AppProviders aiPlatform={aiPlatform} bridge={bridge}><App /></AppProviders>);
   await act(async () => undefined);
+  fireEvent.click(screen.getByRole("button", { name: /打开设备连接/ }));
   fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
-  await screen.findByText("已就绪");
+  expect((await screen.findAllByText("已就绪")).length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole("button", { name: "关闭设备连接" }));
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "AI 调参" }));
     await Promise.resolve();

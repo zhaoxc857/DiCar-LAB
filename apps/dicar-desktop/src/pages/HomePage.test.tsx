@@ -3,8 +3,13 @@ import { App } from "../app/App";
 import { AppProviders } from "../app/providers";
 import { MockBridge } from "../bridge/mockBridge";
 import { WebSerialBridge, type BrowserSerialPort } from "../bridge/webSerialBridge";
+import { seededRecordingController } from "../test/seededRecordingController";
 
-it("renders the B-style menu and connects the real simulator destination", async () => {
+beforeEach(() => {
+  window.history.pushState({}, "", "/");
+});
+
+it("renders a truthful overview and connects the simulator from the device drawer", async () => {
   const bridge = new MockBridge();
   render(
     <AppProviders bridge={bridge}>
@@ -13,12 +18,15 @@ it("renders the B-style menu and connects the real simulator destination", async
   );
   await act(async () => undefined);
 
-  expect(screen.getByRole("heading", { name: "工作区" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /实时调参与波形/ })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /计划发布.*数据记录与回放/ })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /计划发布.*参数方案库/ })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /连接与链路诊断/ })).toBeInTheDocument();
-  expect(screen.getByText("DCTP v1 · 模拟器待连接")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "概览" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "进入实时调试" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "打开波形记录" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "查看诊断" })).toBeInTheDocument();
+  expect(screen.queryByText("计划发布")).not.toBeInTheDocument();
+  expect(screen.queryByText("参数方案库")).not.toBeInTheDocument();
+  expect(screen.queryByText("CAR-01 / DEFAULT")).not.toBeInTheDocument();
+  expect(screen.getByText("通用 Manifest")).toBeInTheDocument();
+  expect(screen.getByText("设备未连接")).toBeInTheDocument();
 
   openConnectionDrawer();
   expect(screen.getByText("本地演示权限")).toBeInTheDocument();
@@ -27,9 +35,21 @@ it("renders the B-style menu and connects the real simulator destination", async
 
   fireEvent.click(screen.getByRole("button", { name: "连接模拟器" }));
   expect((await screen.findAllByText("已就绪")).length).toBeGreaterThanOrEqual(1);
-  expect(screen.getByText("DCTP v1 · 模拟器已连接")).toBeInTheDocument();
   expect(screen.getByText("16 个遥测通道")).toBeInTheDocument();
   expect(screen.getByText("19 个参数")).toBeInTheDocument();
+});
+
+it("shows the newest completed recordings from the existing recording controller", async () => {
+  const { bridge, controller } = await seededRecordingController();
+  render(
+    <AppProviders bridge={bridge} recordingController={controller}>
+      <App />
+    </AppProviders>,
+  );
+
+  expect(await screen.findByText("最新记录")).toBeInTheDocument();
+  expect(screen.getByText("较早记录")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "查看全部记录" })).toHaveAttribute("href", "/records");
 });
 
 it("separates the real serial path and never reports a web preview as hardware", async () => {
@@ -80,7 +100,7 @@ it("authorizes a Web Serial port without claiming the DCTP device is ready", asy
   expect(screen.getAllByText("未连接").length).toBeGreaterThanOrEqual(1);
 });
 
-it("keeps the skip link and exposes an honest deferred destination", async () => {
+it("keeps the skip link and opens the completed recordings destination", async () => {
   render(
     <AppProviders bridge={new MockBridge()}>
       <App />
@@ -91,10 +111,9 @@ it("keeps the skip link and exposes an honest deferred destination", async () =>
     "#main-content",
   );
 
-  fireEvent.click(screen.getByRole("link", { name: /计划发布.*数据记录与回放/ }));
-  expect(await screen.findByRole("heading", { name: "数据记录与回放" })).toBeInTheDocument();
-  expect(screen.getByText(/首版后续阶段开放/)).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "返回工作区" })).toHaveAttribute("href", "/");
+  fireEvent.click(screen.getByRole("link", { name: "打开波形记录" }));
+  expect(await screen.findByRole("heading", { name: "波形记录" })).toBeInTheDocument();
+  expect(screen.queryByText(/首版后续阶段开放/)).not.toBeInTheDocument();
 });
 
 function openConnectionDrawer() {
