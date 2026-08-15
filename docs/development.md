@@ -2,7 +2,7 @@
 
 本文说明 DiCar Tune 0.2.0 的代码边界、开发环境、质量门禁和 Windows 打包流程。使用说明见[用户手册](user-guide.md)。
 
-当前 `release/` 内 0.2.0 安装版与便携版已于 2026-08-15 按第 7、9 节完整流程重新构建，包含精准控制台前端优化；版本号与 Rust/Tauri 后端逻辑未改变。
+当前 `release/` 内 0.2.0 安装版与便携版已于 2026-08-15 按第 7、9 节完整流程重新构建，包含旧首页四入口与精准控制台工作台的兼容合并；版本号与 Rust/Tauri 后端逻辑未改变。
 
 ## 1. 架构
 
@@ -25,7 +25,7 @@ flowchart LR
 主要边界：
 
 - React 只消费快照和桥接事件，不直接打开串口或构造 DCTP 帧。
-- `AppShell` 固定提供概览、实时调试、波形记录、诊断四个路由；`ConnectionDrawer` 仍只调用既有 `DesktopBridge`，连接逻辑没有搬进 React 组件。
+- `AppShell` 固定提供概览、实时调试、波形记录、诊断四个顶部路由；首页另以四张真实功能卡呈现实时调试、记录回放、参数方案和链路诊断。`ConnectionDrawer` 仍是唯一连接表单并只调用既有 `DesktopBridge`。
 - 车辆 YAML 只把 Manifest 的精确 `machine_name` 解析成任务；resolver 输出稳定的 `paramId`/`channelId`，不修改设备 DTO。
 - Tauri 层负责类型化命令、事件转发、串口发现和内置模拟器生命周期。
 - 独立 `AiPlatform` 把 React 与 Tauri AI command 隔离；Rust AI service 独占凭据、HTTP、限制和取消，Key 不进入前端状态。
@@ -132,6 +132,7 @@ Web 预览不启用 AI，也不接受或保存 DeepSeek Key；只有 Tauri Windo
 - `WorkbenchLayout` 始终按导航、编辑器、波形的同一 DOM 顺序渲染；标准/赛道模式不会卸载编辑器或波形，因此参数草稿、录制状态和实时缓冲保持不变。
 - `TelemetryStrip` 只读取已解析控制环、RAM 参数、绘图环形缓冲和 `AppSnapshot`；缺失字段显示“—”，不推算实测 RX 速率或健康评分。
 - `RecordingLibrary` 复用现有 `RecordingController`，由 `/records` 独立页面承载；回放仍使用独立只读缓冲。
+- 参数方案没有第二套页面或 store：`/live?panel=snapshots` 打开工作台现有 `SnapshotManagerDialog`，关闭时只移除 `panel` 查询参数并保留其他参数；旧 `/parameter-sets` 使用 replace 重定向到该地址。
 - `FirmwareFlashEntry` 当前只接受类型化前端状态并固定传入 `unavailable`，没有 Tauri command、Bridge 方法或 Rust 后端绑定。不得把禁用入口描述为已支持无线烧录。
 
 ## 5. 运行模拟器
@@ -233,7 +234,7 @@ pnpm build
 pnpm test:e2e
 ```
 
-当前前端基线为 43 个 Vitest 文件 / 186 个测试、10 个 Playwright 场景。覆盖范围包括 bridge 合同、车辆 YAML 安全边界、Manifest 兼容解析、设置 v4、双模式零设备命令、设备抽屉、遥测指标条、参数编辑、参数方案（保存/差异应用/固化记录）、安全 AI command/取消/凭据迁移、原始记录分块/限额/原子导入、独立记录页与回放、编码器、波形、权限、诊断语义分组、窄屏导航和 axe 可访问性。Playwright 使用 Mock 验证录制、订阅变化封存、回放和 JSON/CSV 下载，不调用真实 DeepSeek。
+当前前端基线为 42 个 Vitest 文件 / 187 个测试、11 个 Playwright 场景。覆盖范围包括 bridge 合同、车辆 YAML 安全边界、Manifest 兼容解析、设置 v4、双模式零设备命令、设备抽屉、四卡首页与旧路由兼容、遥测指标条、参数编辑、参数方案（保存/差异应用/固化记录）、安全 AI command/取消/凭据迁移、原始记录分块/限额/原子导入、独立记录页与回放、编码器、波形、权限、诊断语义分组、窄屏导航和 axe 可访问性。Playwright 使用 Mock 验证首页响应式布局、参数方案深链接、录制、订阅变化封存、回放和 JSON/CSV 下载，不调用真实 DeepSeek。
 
 ### Rust workspace
 

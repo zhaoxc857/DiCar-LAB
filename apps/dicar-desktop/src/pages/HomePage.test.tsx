@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App } from "../app/App";
 import { AppProviders } from "../app/providers";
 import { MockBridge } from "../bridge/mockBridge";
@@ -18,11 +18,12 @@ it("renders a truthful overview and connects the simulator from the device drawe
   );
   await act(async () => undefined);
 
-  expect(screen.getByRole("heading", { name: "概览" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "工作区" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "进入实时调试" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "打开波形记录" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "查看诊断" })).toBeInTheDocument();
-  expect(screen.queryByText("参数方案库")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "管理参数方案" })).toHaveAttribute("href", "/live?panel=snapshots");
+  expect(screen.getByRole("link", { name: "查看链路诊断" })).toBeInTheDocument();
+  expect(screen.getByText("参数方案")).toBeInTheDocument();
   expect(screen.getByText("通用 Manifest")).toBeInTheDocument();
   expect(screen.getByText("设备未连接")).toBeInTheDocument();
 
@@ -112,6 +113,45 @@ it("keeps the skip link and opens the completed recordings destination", async (
   fireEvent.click(screen.getByRole("link", { name: "打开波形记录" }));
   expect(await screen.findByRole("heading", { name: "波形记录" })).toBeInTheDocument();
   expect(screen.queryByText(/首版后续阶段开放/)).not.toBeInTheDocument();
+});
+
+it("opens the shared parameter snapshot manager from the home card without device commands", async () => {
+  const bridge = new MockBridge();
+  const subscription = vi.spyOn(bridge, "setTelemetrySubscription");
+  const paused = vi.spyOn(bridge, "setPaused");
+  const write = vi.spyOn(bridge, "writeParameter");
+  const commit = vi.spyOn(bridge, "commitParameters");
+  render(
+    <AppProviders bridge={bridge}>
+      <App />
+    </AppProviders>,
+  );
+  await act(async () => undefined);
+
+  fireEvent.click(screen.getByRole("link", { name: "管理参数方案" }));
+  const dialog = await screen.findByRole("dialog", { name: "参数方案" });
+  expect(window.location.pathname).toBe("/live");
+  expect(window.location.search).toBe("?panel=snapshots");
+  expect(subscription).not.toHaveBeenCalled();
+  expect(paused).not.toHaveBeenCalled();
+  expect(write).not.toHaveBeenCalled();
+  expect(commit).not.toHaveBeenCalled();
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
+  await waitFor(() => expect(window.location.search).toBe(""));
+});
+
+it("redirects the legacy parameter-sets route to the shared workbench dialog", async () => {
+  window.history.pushState({}, "", "/parameter-sets");
+  render(
+    <AppProviders bridge={new MockBridge()}>
+      <App />
+    </AppProviders>,
+  );
+
+  expect(await screen.findByRole("dialog", { name: "参数方案" })).toBeInTheDocument();
+  expect(window.location.pathname).toBe("/live");
+  expect(window.location.search).toBe("?panel=snapshots");
 });
 
 function openConnectionDrawer() {

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 test("B 菜单进入 A 工作台并完成写 RAM 与固化", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "工作区" })).toBeVisible();
 
   await page.getByRole("link", { name: "进入实时调试" }).click();
   await expect(page.getByRole("heading", { name: "实时调参与波形" })).toBeVisible();
@@ -18,6 +18,38 @@ test("B 菜单进入 A 工作台并完成写 RAM 与固化", async ({ page }) =>
   await expect(page.getByRole("dialog", { name: "固化参数修改" })).toBeVisible();
   await page.getByRole("button", { name: "固化到 Flash" }).click();
   await expect(page.getByText("0 项待固化")).toHaveCount(0);
+});
+
+test("旧首页四入口兼容新工作台和参数方案历史链接", async ({ page }) => {
+  await page.goto("/");
+  const cards = [
+    page.getByRole("link", { name: "进入实时调试" }),
+    page.getByRole("link", { name: "打开波形记录" }),
+    page.getByRole("link", { name: "管理参数方案" }),
+    page.getByRole("link", { name: "查看链路诊断" }),
+  ];
+  for (const card of cards) await expect(card).toBeVisible();
+  const desktopBoxes = await Promise.all(cards.map((card) => card.boundingBox()));
+  expect(desktopBoxes[0]?.y).toBe(desktopBoxes[1]?.y);
+  expect(desktopBoxes[2]?.y).toBe(desktopBoxes[3]?.y);
+  expect(desktopBoxes[2]?.y ?? 0).toBeGreaterThan(desktopBoxes[0]?.y ?? 0);
+
+  await page.setViewportSize({ width: 640, height: 720 });
+  const narrowBoxes = await Promise.all(cards.map((card) => card.boundingBox()));
+  expect(narrowBoxes[1]?.y ?? 0).toBeGreaterThan(narrowBoxes[0]?.y ?? 0);
+  expect(narrowBoxes[2]?.y ?? 0).toBeGreaterThan(narrowBoxes[1]?.y ?? 0);
+  expect(narrowBoxes[3]?.y ?? 0).toBeGreaterThan(narrowBoxes[2]?.y ?? 0);
+
+  await cards[2].click();
+  const dialog = page.getByRole("dialog", { name: "参数方案" });
+  await expect(dialog).toBeVisible();
+  await expect(page).toHaveURL(/\/live\?panel=snapshots$/);
+  await dialog.getByRole("button", { name: "关闭" }).click();
+  await expect(page).toHaveURL(/\/live$/);
+
+  await page.goto("/parameter-sets");
+  await expect(page.getByRole("dialog", { name: "参数方案" })).toBeVisible();
+  await expect(page).toHaveURL(/\/live\?panel=snapshots$/);
 });
 
 test("Observer 只能查看波形，不能修改或固化", async ({ page }) => {

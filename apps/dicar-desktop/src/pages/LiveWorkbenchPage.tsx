@@ -1,5 +1,6 @@
 import { WaveSine } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 import { AutoTuneWizard } from "../components/workbench/AutoTuneWizard";
 import { ChangeBar } from "../components/workbench/ChangeBar";
 import { CommitReviewDialog } from "../components/workbench/CommitReviewDialog";
@@ -27,6 +28,7 @@ import { builtInProfiles, GENERIC_PROFILE_ID } from "../vehicleProfiles/catalog"
 import { genericVehicleWorkspace, resolveVehicleWorkspace } from "../vehicleProfiles/resolver";
 
 export function LiveWorkbenchPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const snapshot = useConnectionStore((state) => state.snapshot);
   const workbenchMode = useSettingsStore((state) => state.workbenchMode);
   const buffer = useWorkspaceStore((state) => state.buffer);
@@ -47,7 +49,7 @@ export function LiveWorkbenchPage() {
   const [selectedGroup, setSelectedGroup] = useState("速度环 PID");
   const [selectedParamId, setSelectedParamId] = useState<number | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  const [snapshotsOpen, setSnapshotsOpen] = useState(searchParams.get("panel") === "snapshots");
   const [autoTuneOpen, setAutoTuneOpen] = useState(false);
   const [waveformRequest, setWaveformRequest] = useState<WaveformSelectionRequest | null>(null);
   const requestId = useRef(0);
@@ -76,6 +78,13 @@ export function LiveWorkbenchPage() {
 
   const selectedRecord = records.find(({ paramId }) => paramId === selectedParamId) ?? records.find(({ group }) => group === selectedGroup) ?? null;
   const dirty = records.filter(({ dirty }) => dirty);
+  function closeSnapshots() {
+    setSnapshotsOpen(false);
+    if (searchParams.get("panel") !== "snapshots") return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("panel");
+    setSearchParams(next, { replace: true });
+  }
   function chooseGroup(group: string) { setSelectedGroup(group); setSelectedParamId(records.find((record) => record.group === group)?.paramId ?? null); }
   function chooseTask(task: WorkspaceTask) {
     setSelectedTask(task);
@@ -105,7 +114,7 @@ export function LiveWorkbenchPage() {
     />
     <ChangeBar dirtyCount={dirty.length} onReview={() => setReviewOpen(true)} />
     <CommitReviewDialog onClose={() => setReviewOpen(false)} open={reviewOpen} records={dirty} />
-    <SnapshotManagerDialog onClose={() => setSnapshotsOpen(false)} open={snapshotsOpen} />
+    <SnapshotManagerDialog onClose={closeSnapshots} open={snapshotsOpen} />
     <AutoTuneWizard onClose={() => setAutoTuneOpen(false)} open={autoTuneOpen} records={records} workspace={workspace} />
   </main>;
 }

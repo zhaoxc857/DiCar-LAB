@@ -55,13 +55,15 @@
 - schema v1 JSON 可导入导出；导入全量验证后单事务写入，重复 ID 重新生成。CSV 按采样时刻展开并防公式注入。
 - 回放使用独立只读 `TelemetryRingBuffer`，支持拖动、单步、0.25×/0.5×/1×/2×/4×和到尾暂停，不暂停设备、不替换实时 store、不发送 Bridge 命令。
 
-### 精准控制台 UI（`ebacc2a`–`6d9cc02`）
-- 顶部只保留“概览、实时调试、波形记录、诊断”四个真实入口；设备状态芯片打开 `ConnectionDrawer`，连接、硬件指南和车型偏好集中在抽屉。旧 `ConnectionStatusBar`、占位页和参数方案库路由已删除。
+### 精准控制台 UI 与旧首页兼容（`ebacc2a`–当前）
+- 顶部保留“概览、实时调试、波形记录、诊断”四个真实入口；首页恢复 2×2 的“实时调参与波形、数据记录与回放、参数方案、连接与链路诊断”四卡信息架构，并保留当前车辆和最近记录摘要。
+- 设备状态芯片打开 `ConnectionDrawer`，连接、硬件指南和车型偏好集中在唯一抽屉。旧 `ConnectionStatusBar` 和占位页保持删除，不恢复第二套连接状态。
+- 参数方案卡进入 `/live?panel=snapshots` 并复用现有 `SnapshotManagerDialog`；旧 `/parameter-sets` 书签使用 replace 重定向到同一入口，关闭面板会清理 `panel` 且保留其他查询参数。
 - `FirmwareFlashEntry` 已预留 `unavailable / ready / preparing / transferring / verifying / succeeded / failed` 前端状态接口，但当前固定为 `unavailable`，没有后端绑定，不能选择或传输固件。
-- `/records` 是真实独立页面，复用既有 `RecordingController`；概览只显示真实设备/车型/固件/参数/遥测/存储代和最近完整记录，不含虚构车辆 ID 或计划卡片。
+- `/records` 是真实独立页面，复用既有 `RecordingController`；首页摘要只显示真实设备/车型/固件/参数/遥测/存储代和最近完整记录，四张卡均指向可执行的真实能力。
 - 实时工作台提供标准/赛道模式，DOM 顺序和组件实例不变；模式切换只改布局密度，测试确认不会发送订阅、暂停、写参数或固化命令。实时指标条只读取现有目标/反馈/误差/订阅/丢样/RTT，缺值为“—”；零 dirty 时不渲染底部变更条。
 - 诊断按设备健康、连接质量、协议事件组织现有快照，原始计数折叠展示；窄屏导航、焦点环、减弱动效和明确的触控尺寸已覆盖。
-- Playwright 覆盖设备抽屉、双模式状态保持、独立记录页、录制/封存/回放/下载、窄屏键盘导航和 axe。视觉审计覆盖 1280×720、1366×768、1920×1080、640×720 与 150% DPI，无横向溢出、控制台错误或控件重叠。
+- 当前门禁为 42 个 Vitest 文件 / 187 项测试和 11 个 Playwright 场景；覆盖四卡首页的桌面 2×2/窄屏单列、参数方案新旧 URL、设备抽屉、双模式状态保持、独立记录页、录制/封存/回放/下载、窄屏键盘导航和 axe。
 - 本阶段只修改 React/TypeScript/CSS/HTML、测试和文档；`DesktopBridge` 后端行为、Rust/Tauri、DCTP wire、消息 ID 和黄金向量均未改变。
 
 ## 3. 0.2.0 发布状态
@@ -76,7 +78,7 @@
 ## 4. 环境与门禁（Windows 11，本机已验证）
 
 - pnpm 全局可用；Node 26 兼容（`.node-version` 仅作推荐）；`git safe.directory` 已配置；MSVC 工具链可用（cc crate 编译 C 库依赖它）。
-- 前端门禁（在 `apps/dicar-desktop/` 或用 `--filter`）：`pnpm lint`、`pnpm typecheck`、`pnpm test -- --run`、`pnpm build`、`pnpm test:e2e`。最近基线为 43 个 Vitest 文件 / 186 个测试、10 个 Playwright 场景。
+- 前端门禁（在 `apps/dicar-desktop/` 或用 `--filter`）：`pnpm lint`、`pnpm typecheck`、`pnpm test -- --run`、`pnpm build`、`pnpm test:e2e`。最近基线为 42 个 Vitest 文件 / 187 个测试、11 个 Playwright 场景。
 - Rust 门禁（仓库根）：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（含 C 交叉验证）、Tauri `native-check`、`cargo run -p dctp-sim --bin generate_vectors -- --check`（六个黄金向量）。
 - 本机 Smart App Control 会误拦个别 Cargo 中间产物哈希；未关闭安全策略。测试目标用等价的包级命令补齐，向量检查使用 release profile，打包仅设置 `CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG=1` 改变 build script 哈希。
 - AI 覆盖使用内存凭据替身和本地 HTTP server；前端/Playwright 使用 Mock，不访问真实 DeepSeek。记录域使用 `fake-indexeddb` 覆盖原子导入、清理、失败回滚和容量边界。

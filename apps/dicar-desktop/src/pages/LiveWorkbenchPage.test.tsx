@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App } from "../app/App";
 import { AppProviders } from "../app/providers";
 import { MockBridge } from "../bridge/mockBridge";
@@ -30,6 +30,25 @@ it("switches Standard and Track density without issuing device commands", async 
 
   fireEvent.click(screen.getByRole("button", { name: "赛道模式" }));
   expect(screen.getByTestId("workbench-layout")).toHaveAttribute("data-workbench-mode", "track");
+  expect(subscription).not.toHaveBeenCalled();
+  expect(paused).not.toHaveBeenCalled();
+  expect(write).not.toHaveBeenCalled();
+  expect(commit).not.toHaveBeenCalled();
+});
+
+it("preserves unrelated query parameters when the snapshot panel closes", async () => {
+  window.history.pushState({}, "", "/live?panel=snapshots&source=legacy");
+  const bridge = new MockBridge();
+  const subscription = vi.spyOn(bridge, "setTelemetrySubscription");
+  const paused = vi.spyOn(bridge, "setPaused");
+  const write = vi.spyOn(bridge, "writeParameter");
+  const commit = vi.spyOn(bridge, "commitParameters");
+  render(<AppProviders bridge={bridge}><App /></AppProviders>);
+
+  const dialog = await screen.findByRole("dialog", { name: "参数方案" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
+
+  await waitFor(() => expect(window.location.search).toBe("?source=legacy"));
   expect(subscription).not.toHaveBeenCalled();
   expect(paused).not.toHaveBeenCalled();
   expect(write).not.toHaveBeenCalled();
