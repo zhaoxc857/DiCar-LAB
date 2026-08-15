@@ -1,9 +1,10 @@
-# DiCar Tune 开发交接（2026-08-14）
+# DiCar Tune 开发交接（2026-08-15）
 
 给新会话/新开发者的现状快照。读完本文 + 按需查阅引用文件，即可继续开发。
 
-- 当前实现分支：`codex/release-0.2.0`，从已验证基线 `3c556f0` 创建。规格提交 `b14495d`；安全 AI 提交 `938a101`、`354d019`；波形记录/回放提交 `443f4ce`、`8b43046`、`d3a699b`、`896144e`、`2a19f82`；文档提交 `a83b47e`。
+- 当前实现分支：`codex/release-0.2.0`，从已验证基线 `3c556f0` 创建。规格提交 `b14495d`；安全 AI 提交 `938a101`、`354d019`；波形记录/回放提交 `443f4ce`、`8b43046`、`d3a699b`、`896144e`、`2a19f82`；精准控制台 UI 设计/计划提交 `42b5687`、`38d58e9`，实施提交 `ebacc2a`、`b23a941`、`07a7d34`、`184b4c0`、`6e90766`、`0239e76`、`94ba3dd`、`6d9cc02`。
 - 0.2.0 已完成门禁、NSIS/便携版构建、精确 PID/回环端口冒烟和 SHA-256 校验。发布文件位于 `release/`，校验值见 `release/SHA256SUMS.txt`。
+- 精准控制台 UI 是上述 0.2.0 二进制构建后的纯前端改进；本阶段没有重新打包或替换 `release/` 文件。下次发布必须重新执行完整门禁、构建、启动和 SHA-256 流程。
 - 权威规格：[docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md](docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md)（DCTP v1 协议与分阶段计划）。
 - 开发文档：[docs/development.md](docs/development.md)（架构、环境、门禁、打包）；用户手册：[docs/user-guide.md](docs/user-guide.md)。
 
@@ -11,10 +12,10 @@
 
 后续工作只允许以下四类：
 
-1. **无线固件烧录**：作为唯一新增产品功能方向；实施前必须先完成安全边界、失败恢复和兼容性设计，不得未经评审直接改变 DCTP wire 或黄金向量。
+1. **无线固件烧录**：下一项新增产品功能；当前只有禁用的前端入口和类型化状态接口，没有 Bridge/Tauri/Rust 后端。实施前必须先完成安全边界、失败恢复和兼容性设计，不得未经评审直接改变 DCTP wire 或黄金向量。
 2. **nanoUART-wl / HC-05 实体环境验证**：软件适配已完成；只有用户明确确认硬件准备好后才开始实测、资格验证和对应修复。
 3. **完善现有功能与 UI**：允许改进当前调参、遥测、AI、记录回放、诊断和易用性，但不借机加入新的平台或云端产品范围。
-4. **及时清理过期文件**：每个里程碑审计旧发布物、临时输出、失效文档和被替代资产；只删除已核实目标，优先采用可恢复操作。
+4. **及时清理过期文件**：每个里程碑审计旧发布物、临时输出、失效文档和被替代资产；只删除已核实目标，优先采用可恢复操作。精准控制台阶段已删除旧占位页和旧连接栏，临时视觉审计用例与产物也已清理。
 
 明确不做：参数方案导入、云账户/团队协作/远程控制、插件市场、多车并发、浏览器真实 DCTP/Web AI，以及 macOS、Linux、手机和平板客户端。除上述四类外，不再推荐或实施其他缺失功能。
 
@@ -37,7 +38,7 @@
 - Rust/Tauri 固定请求官方 DeepSeek completions HTTPS，禁止重定向，连接/总超时 10/60 秒，响应上限 1 MiB；UUID + `CancellationToken` 使前端 Abort 真正终止 Rust 请求。
 - `keyring 3.6.3` `windows-native` 把 Key 存入 Windows Credential Manager，服务/用户为 `com.dicar.tune` / `deepseek-api-key`。Key 不返回前端、不写日志、不进入错误文本。
 - 五个命令已注册：`ai_credential_status`、`ai_set_api_key`、`ai_clear_api_key`、`ai_complete`、`ai_cancel`。React 只依赖独立 `AiPlatform`。
-- `settingsStore` v3 只保存 `aiModel`，hydration 前删除旧 `aiBaseUrl`/`aiApiKey`。浏览器、Web Serial 和非 Tauri Mock 明确不可用，也不显示 Key 输入。
+- `settingsStore` 当前为 v4：保存串口偏好、`aiModel` 和纯前端 `workbenchMode`，hydration 前删除旧 `aiBaseUrl`/`aiApiKey`。浏览器、Web Serial 和非 Tauri Mock 明确不可用，也不显示 Key 输入。
 
 ### 无硬件 PID 闭环模拟（`77181d4`–`db88b58`）
 - Rust `dctp-sim` 与前端 `MockBridge` 都采用固定 2 ms 控制步长、PID + 一阶惯性模型；目标、实际速度、误差、左右轮速和左右 PWM 会随参数动态响应。两端共享行为语义，不要求逐位浮点一致。
@@ -54,6 +55,15 @@
 - schema v1 JSON 可导入导出；导入全量验证后单事务写入，重复 ID 重新生成。CSV 按采样时刻展开并防公式注入。
 - 回放使用独立只读 `TelemetryRingBuffer`，支持拖动、单步、0.25×/0.5×/1×/2×/4×和到尾暂停，不暂停设备、不替换实时 store、不发送 Bridge 命令。
 
+### 精准控制台 UI（`ebacc2a`–`6d9cc02`）
+- 顶部只保留“概览、实时调试、波形记录、诊断”四个真实入口；设备状态芯片打开 `ConnectionDrawer`，连接、硬件指南和车型偏好集中在抽屉。旧 `ConnectionStatusBar`、占位页和参数方案库路由已删除。
+- `FirmwareFlashEntry` 已预留 `unavailable / ready / preparing / transferring / verifying / succeeded / failed` 前端状态接口，但当前固定为 `unavailable`，没有后端绑定，不能选择或传输固件。
+- `/records` 是真实独立页面，复用既有 `RecordingController`；概览只显示真实设备/车型/固件/参数/遥测/存储代和最近完整记录，不含虚构车辆 ID 或计划卡片。
+- 实时工作台提供标准/赛道模式，DOM 顺序和组件实例不变；模式切换只改布局密度，测试确认不会发送订阅、暂停、写参数或固化命令。实时指标条只读取现有目标/反馈/误差/订阅/丢样/RTT，缺值为“—”；零 dirty 时不渲染底部变更条。
+- 诊断按设备健康、连接质量、协议事件组织现有快照，原始计数折叠展示；窄屏导航、焦点环、减弱动效和明确的触控尺寸已覆盖。
+- Playwright 覆盖设备抽屉、双模式状态保持、独立记录页、录制/封存/回放/下载、窄屏键盘导航和 axe。视觉审计覆盖 1280×720、1366×768、1920×1080、640×720 与 150% DPI，无横向溢出、控制台错误或控件重叠。
+- 本阶段只修改 React/TypeScript/CSS/HTML、测试和文档；`DesktopBridge` 后端行为、Rust/Tauri、DCTP wire、消息 ID 和黄金向量均未改变。
+
 ## 3. 0.2.0 发布状态
 
 - `DiCar-Tune-0.2.0-Windows-x64-Setup.exe`：3,175,736 字节，SHA-256 `95D046B0373A957A8DF4D22D7806A6A5C44D8ACAC9BA145E02FBBDF1D1742094`。
@@ -61,12 +71,12 @@
 - 便携版隐藏启动冒烟：精确 PID 33500 持续运行并拥有 `127.0.0.1:60547`，随后只终止该 PID并确认退出。
 - 两个 0.1.2 实体文件在 0.2.0 全部检查成功后移入 Windows 回收站；`release/` 现在只保留两个 0.2.0 产物和校验清单。
 
-参数方案导入明确不属于 0.2.0，也不再列入后续待办。云协作、无线烧录、实板移植与 macOS/Linux/移动端仍按第 1 节暂缓。
+参数方案导入明确不属于 0.2.0，也不再列入后续待办。无线烧录是下一项开发；nanoUART-wl/HC-05 实板验证必须等用户确认硬件就绪。云协作、macOS/Linux/移动端等仍不在范围内。
 
 ## 4. 环境与门禁（Windows 11，本机已验证）
 
 - pnpm 全局可用；Node 26 兼容（`.node-version` 仅作推荐）；`git safe.directory` 已配置；MSVC 工具链可用（cc crate 编译 C 库依赖它）。
-- 前端门禁（在 `apps/dicar-desktop/` 或用 `--filter`）：`pnpm lint`、`pnpm typecheck`、`pnpm test -- --run`、`pnpm build`、`pnpm test:e2e`。最近基线为 39 个 Vitest 文件 / 171 个测试、8 个 Playwright 场景。
+- 前端门禁（在 `apps/dicar-desktop/` 或用 `--filter`）：`pnpm lint`、`pnpm typecheck`、`pnpm test -- --run`、`pnpm build`、`pnpm test:e2e`。最近基线为 43 个 Vitest 文件 / 186 个测试、10 个 Playwright 场景。
 - Rust 门禁（仓库根）：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（含 C 交叉验证）、Tauri `native-check`、`cargo run -p dctp-sim --bin generate_vectors -- --check`（六个黄金向量）。
 - 本机 Smart App Control 会误拦个别 Cargo 中间产物哈希；未关闭安全策略。测试目标用等价的包级命令补齐，向量检查使用 release profile，打包仅设置 `CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG=1` 改变 build script 哈希。
 - AI 覆盖使用内存凭据替身和本地 HTTP server；前端/Playwright 使用 Mock，不访问真实 DeepSeek。记录域使用 `fake-indexeddb` 覆盖原子导入、清理、失败回滚和容量边界。
@@ -85,5 +95,7 @@
 
 1. 读本文件。
 2. `git log --oneline -15` 对照第 2 节确认基线未漂移。
-3. 0.2.0 已完成；从未完成清单中选择新需求前，先确认第 1 节裁剪仍有效。
-4. 如需改协议/C 库，先重读第 5 节和规格对应章节。
+3. 下一项是“无线固件烧录后端与硬件流程”：先写安全边界、失败恢复、兼容性和升级状态机规格，评审后再生成实施计划。
+4. 无线烧录设计不得假定透明串口模块自带 Bootloader；必须明确目标 MCU、进入升级模式的方法、镜像格式、签名/校验、断电恢复和回滚能力。
+5. nanoUART-wl/HC-05 实体环境验证排在无线烧录之后，且只有用户确认硬件准备好才开始。
+6. 如需改协议/C 库，先重读第 5 节和规格对应章节。

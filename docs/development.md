@@ -2,6 +2,8 @@
 
 本文说明 DiCar Tune 0.2.0 的代码边界、开发环境、质量门禁和 Windows 打包流程。使用说明见[用户手册](user-guide.md)。
 
+当前源码包含 0.2.0 二进制构建后的精准控制台前端优化；该阶段没有修改版本号、Rust/Tauri 后端或 `release/` 产物。下一次生成用户安装包时必须重新执行第 7、9 节全部流程。
+
 ## 1. 架构
 
 ```mermaid
@@ -23,6 +25,7 @@ flowchart LR
 主要边界：
 
 - React 只消费快照和桥接事件，不直接打开串口或构造 DCTP 帧。
+- `AppShell` 固定提供概览、实时调试、波形记录、诊断四个路由；`ConnectionDrawer` 仍只调用既有 `DesktopBridge`，连接逻辑没有搬进 React 组件。
 - 车辆 YAML 只把 Manifest 的精确 `machine_name` 解析成任务；resolver 输出稳定的 `paramId`/`channelId`，不修改设备 DTO。
 - Tauri 层负责类型化命令、事件转发、串口发现和内置模拟器生命周期。
 - 独立 `AiPlatform` 把 React 与 Tauri AI command 隔离；Rust AI service 独占凭据、HTTP、限制和取消，Key 不进入前端状态。
@@ -122,6 +125,15 @@ http://127.0.0.1:5173/
 Web 预览默认提供确定性模拟体验。支持 Web Serial 的 Chromium 浏览器可以授权和识别 USB 串口，但真实 DCTP 会话仍应使用 Windows 桌面 App。
 Web 预览不启用 AI，也不接受或保存 DeepSeek Key；只有 Tauri Windows 桌面壳会创建可用的 `AiPlatform`。
 
+### 精准控制台前端结构
+
+- 顶部设备状态芯片只显示连接真值，点击后打开 `ConnectionDrawer`；抽屉分为连接、硬件指南和偏好，导航后窄屏抽屉会关闭。
+- `settingsStore` schema v4 在既有串口与 `aiModel` 设置外增加 `workbenchMode: "standard" | "track"`。该字段只影响 CSS grid 与密度，不进入 `DesktopBridge`，切换模式不发送订阅、暂停、写参数或固化命令。
+- `WorkbenchLayout` 始终按导航、编辑器、波形的同一 DOM 顺序渲染；标准/赛道模式不会卸载编辑器或波形，因此参数草稿、录制状态和实时缓冲保持不变。
+- `TelemetryStrip` 只读取已解析控制环、RAM 参数、绘图环形缓冲和 `AppSnapshot`；缺失字段显示“—”，不推算实测 RX 速率或健康评分。
+- `RecordingLibrary` 复用现有 `RecordingController`，由 `/records` 独立页面承载；回放仍使用独立只读缓冲。
+- `FirmwareFlashEntry` 当前只接受类型化前端状态并固定传入 `unavailable`，没有 Tauri command、Bridge 方法或 Rust 后端绑定。不得把禁用入口描述为已支持无线烧录。
+
 ## 5. 运行模拟器
 
 查看 CLI：
@@ -185,8 +197,9 @@ drop 路径的请求表清理。
 - `ai_complete`
 - `ai_cancel`
 
-前端 `settingsStore` schema v3 只保存 `aiModel`，迁移在 Zustand hydration 前
-直接清除旧 `aiBaseUrl`/`aiApiKey`。React 只消费 `AiPlatform`，不直接 import
+前端 `settingsStore` schema v4 保存串口偏好、`aiModel` 和纯前端
+`workbenchMode`，迁移在 Zustand hydration 前直接清除旧 `aiBaseUrl`/`aiApiKey`。
+React 只消费 `AiPlatform`，不直接 import
 Tauri invoke。Rust 测试用内存凭据替身和本地 HTTP server，自动化不访问真实
 DeepSeek。
 
@@ -205,7 +218,8 @@ DeepSeek。
 JSON 保存元数据和原始批次；CSV 是按采样时刻展开的宽表并处理公式注入。
 导出和回放用引用计数保护记录不被容量清理。回放把完整记录加载进独立
 `TelemetryRingBuffer`，只向 `WaveformCanvas` 传显式 `viewportEndUs`；它不读取
-实时 store，也不调用 `DesktopBridge`。
+实时 store，也不调用 `DesktopBridge`。记录管理由 `/records` 的
+`RecordingLibrary` 呈现；工作台只保留开始/停止录制和进入该页面的链接。
 
 ## 7. 质量门禁
 
@@ -219,7 +233,7 @@ pnpm build
 pnpm test:e2e
 ```
 
-覆盖范围包括 bridge 合同、车辆 YAML 安全边界、Manifest 兼容解析、配置持久化、任务工作区、连接栏、参数编辑、参数方案（保存/差异应用/固化记录）、安全 AI command/取消/凭据迁移、原始记录分块/限额/原子导入、独立回放、编码器、波形、权限、首页到工作台流程和 HC-05 说明。Playwright 使用 Mock 验证录制、订阅变化封存、回放和 JSON/CSV 下载，不调用真实 DeepSeek。
+当前前端基线为 43 个 Vitest 文件 / 186 个测试、10 个 Playwright 场景。覆盖范围包括 bridge 合同、车辆 YAML 安全边界、Manifest 兼容解析、设置 v4、双模式零设备命令、设备抽屉、遥测指标条、参数编辑、参数方案（保存/差异应用/固化记录）、安全 AI command/取消/凭据迁移、原始记录分块/限额/原子导入、独立记录页与回放、编码器、波形、权限、诊断语义分组、窄屏导航和 axe 可访问性。Playwright 使用 Mock 验证录制、订阅变化封存、回放和 JSON/CSV 下载，不调用真实 DeepSeek。
 
 ### Rust workspace
 
@@ -323,6 +337,7 @@ target/release/bundle/nsis/DiCar Tune_<version>_x64-setup.exe
 - UI 限制用于指导使用者，核心限制才是不可绕过的安全边界。
 - 不根据商品宣传直接承诺距离、速率或抗干扰性能；实体链路必须单独验证。
 - HC-05 使用 Windows Bluetooth Classic SPP 传出 COM，不把它描述为 Web Bluetooth。
+- 当前无线烧录只有 `FirmwareFlashEntry` 禁用入口。开始实现前必须先写安全边界、失败恢复、固件兼容和断电恢复规格，再设计后端命令；不得复用普通参数固化文案冒充固件升级。
 
 ## 11. 贡献建议
 
@@ -332,7 +347,7 @@ target/release/bundle/nsis/DiCar Tune_<version>_x64-setup.exe
 - 保持 UI 只消费 bridge/store，不在组件中直接调用 Tauri API。
 - 不提交 `target/`、临时测试目录或已被替代的发布二进制。
 - 每个里程碑结束时检查旧发布物、临时输出、失效文档和被替代资产；先解析并核实精确路径，优先移入回收站或采用其他可恢复清理方式，不使用宽泛递归删除。
-- 新增产品能力仅限无线固件烧录；实体 nanoUART-wl/HC-05 验证必须等待用户确认硬件就绪。其他工作只完善现有功能与 UI。
+- 下一项新增产品能力是无线固件烧录后端与硬件流程；实体 nanoUART-wl/HC-05 验证排在其后，并必须等待用户确认硬件就绪。其他工作只完善现有功能与 UI。
 - 提交前运行与变更范围匹配的聚焦测试，并在最终阶段运行完整门禁。
 
 返回[项目 README](../README.md)或查看[用户手册](user-guide.md)。
