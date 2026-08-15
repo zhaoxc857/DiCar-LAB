@@ -5,19 +5,27 @@ import type { SerialHardwareProfile } from "../domain/types";
 
 const SETTINGS_STORAGE_KEY = "dicar-tune-settings";
 
-type PersistedSettingsV3 = {
+export type WorkbenchMode = "standard" | "track";
+
+type PersistedSettingsV4 = {
   serialHardwareProfile: SerialHardwareProfile;
   serialPortName: string;
   serialBaudRate: number;
   aiModel: string;
+  workbenchMode: WorkbenchMode;
 };
 
-type SettingsState = PersistedSettingsV3 & {
+type SettingsState = PersistedSettingsV4 & {
   saveSerialConnection: (hardwareProfile: SerialHardwareProfile, portName: string, baudRate: number) => void;
   saveAiModel: (model: string) => void;
+  saveWorkbenchMode: (mode: WorkbenchMode) => void;
 };
 
-export function migrateSettingsV3(persisted: unknown): PersistedSettingsV3 {
+function normalizeWorkbenchMode(value: unknown): WorkbenchMode {
+  return value === "track" ? "track" : "standard";
+}
+
+export function migrateSettingsV4(persisted: unknown): PersistedSettingsV4 {
   const legacy = (typeof persisted === "object" && persisted !== null ? persisted : {}) as Record<string, unknown>;
   const serialBaudRate = legacy.serialBaudRate;
   const aiModel = legacy.aiModel;
@@ -30,6 +38,7 @@ export function migrateSettingsV3(persisted: unknown): PersistedSettingsV3 {
       ? serialBaudRate
       : 460_800,
     aiModel: typeof aiModel === "string" && aiModel.trim().length > 0 ? aiModel.trim() : DEFAULT_AI_MODEL,
+    workbenchMode: normalizeWorkbenchMode(legacy.workbenchMode),
   };
 }
 
@@ -39,8 +48,8 @@ export function scrubLegacyAiSettings(storage: Storage): void {
   try {
     const envelope = JSON.parse(raw) as { state?: unknown };
     storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({
-      state: migrateSettingsV3(envelope.state),
-      version: 3,
+      state: migrateSettingsV4(envelope.state),
+      version: 4,
     }));
   } catch {
     storage.removeItem(SETTINGS_STORAGE_KEY);
@@ -60,24 +69,27 @@ export const useSettingsStore = create<SettingsState>()(persist((set) => ({
   serialPortName: "",
   serialBaudRate: 460_800,
   aiModel: DEFAULT_AI_MODEL,
+  workbenchMode: "standard",
   saveSerialConnection: (serialHardwareProfile, serialPortName, serialBaudRate) => set({
     serialHardwareProfile,
     serialPortName,
     serialBaudRate,
   }),
   saveAiModel: (aiModel) => set({ aiModel: aiModel.trim() || DEFAULT_AI_MODEL }),
+  saveWorkbenchMode: (workbenchMode) => set({ workbenchMode }),
 }), {
   name: SETTINGS_STORAGE_KEY,
-  version: 3,
-  migrate: migrateSettingsV3,
-  partialize: ({ serialHardwareProfile, serialPortName, serialBaudRate, aiModel }) => ({
+  version: 4,
+  migrate: migrateSettingsV4,
+  partialize: ({ serialHardwareProfile, serialPortName, serialBaudRate, aiModel, workbenchMode }) => ({
     serialHardwareProfile,
     serialPortName,
     serialBaudRate,
     aiModel,
+    workbenchMode,
   }),
   merge: (persisted, current) => ({
     ...current,
-    ...migrateSettingsV3(persisted),
+    ...migrateSettingsV4(persisted),
   }),
 }));

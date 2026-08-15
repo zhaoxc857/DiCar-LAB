@@ -1,11 +1,16 @@
-import { migrateSettingsV3, scrubLegacyAiSettings } from "./settingsStore";
+import {
+  migrateSettingsV4,
+  scrubLegacyAiSettings,
+  useSettingsStore,
+} from "./settingsStore";
 
 beforeEach(() => {
   localStorage.clear();
+  useSettingsStore.setState({ workbenchMode: "standard" });
 });
 
-it("migrates settings to v3 without carrying a base URL or plaintext API key", () => {
-  const migrated = migrateSettingsV3({
+it("adds standard workbench mode while migrating without carrying AI secrets", () => {
+  const migrated = migrateSettingsV4({
     serialHardwareProfile: "nanoUartWl",
     serialPortName: "COM7",
     serialBaudRate: 115_200,
@@ -19,9 +24,24 @@ it("migrates settings to v3 without carrying a base URL or plaintext API key", (
     serialPortName: "COM7",
     serialBaudRate: 115_200,
     aiModel: "deepseek-reasoner",
+    workbenchMode: "standard",
   });
   expect(JSON.stringify(migrated)).not.toContain("sk-plaintext");
   expect(JSON.stringify(migrated)).not.toContain("attacker.invalid");
+});
+
+it("rejects an unknown workbench mode during migration", () => {
+  expect(migrateSettingsV4({ workbenchMode: "track" }).workbenchMode).toBe("track");
+  expect(migrateSettingsV4({ workbenchMode: "invalid" }).workbenchMode).toBe("standard");
+});
+
+it("persists track mode without introducing plaintext AI settings", () => {
+  useSettingsStore.getState().saveWorkbenchMode("track");
+
+  const raw = localStorage.getItem("dicar-tune-settings") ?? "";
+  expect(raw).toContain('"workbenchMode":"track"');
+  expect(raw).not.toContain("aiApiKey");
+  expect(raw).not.toContain("aiBaseUrl");
 });
 
 it("scrubs legacy plaintext fields from the raw localStorage payload", () => {
@@ -42,8 +62,12 @@ it("scrubs legacy plaintext fields from the raw localStorage payload", () => {
   expect(raw).not.toContain("aiApiKey");
   expect(raw).not.toContain("aiBaseUrl");
   expect(JSON.parse(raw)).toMatchObject({
-    version: 3,
-    state: { serialPortName: "COM7", aiModel: "deepseek-chat" },
+    version: 4,
+    state: {
+      serialPortName: "COM7",
+      aiModel: "deepseek-chat",
+      workbenchMode: "standard",
+    },
   });
 });
 

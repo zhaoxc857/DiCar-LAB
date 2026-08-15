@@ -1,18 +1,23 @@
 :root {
-  --background: #071018;
-  --surface: #0b1620;
-  --surface-raised: #101f2b;
-  --surface-hover: #152836;
-  --border: #263746;
-  --text: #f2f7fa;
-  --text-muted: #a8bac7;
-  --interactive: #38bdf8;
-  --interactive-strong: #0ea5e9;
-  --success: #34d399;
-  --warning: #fbbf24;
-  --danger: #fb7185;
-  --focus-ring: #38bdf8;
-  --radius: 6px;
+  --background: #060d12;
+  --surface: #0a151c;
+  --surface-raised: #0e1b23;
+  --surface-hover: #132630;
+  --border: #263a46;
+  --border-subtle: color-mix(in srgb, var(--border) 62%, transparent);
+  --text: #e8f2f5;
+  --text-muted: #91a6ae;
+  --interactive: #36d5e4;
+  --interactive-strong: #16b8ca;
+  --success: #6ae3b2;
+  --warning: #f3b95f;
+  --danger: #ff7580;
+  --focus-ring: #67e8f9;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --control-height: 40px;
+  --control-height-compact: 32px;
   --font-ui: Inter, "Noto Sans SC", "Segoe UI", "Microsoft YaHei", sans-serif;
   --font-data: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
 }
