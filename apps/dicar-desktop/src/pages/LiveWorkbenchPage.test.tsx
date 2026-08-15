@@ -2,9 +2,13 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { App } from "../app/App";
 import { AppProviders } from "../app/providers";
 import { MockBridge } from "../bridge/mockBridge";
+import { useSettingsStore } from "../stores/settingsStore";
 import { useVehicleProfileStore } from "../stores/vehicleProfileStore";
 
-beforeEach(() => useVehicleProfileStore.getState().reset());
+beforeEach(() => {
+  useVehicleProfileStore.getState().reset();
+  useSettingsStore.setState({ workbenchMode: "standard" });
+});
 
 async function connectSimulator() {
   fireEvent.click(screen.getByRole("button", { name: /打开设备连接/ }));
@@ -13,6 +17,24 @@ async function connectSimulator() {
   expect((await screen.findAllByText("已就绪")).length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole("button", { name: "关闭设备连接" }));
 }
+
+it("switches Standard and Track density without issuing device commands", async () => {
+  window.history.pushState({}, "", "/live");
+  const bridge = new MockBridge();
+  const subscription = vi.spyOn(bridge, "setTelemetrySubscription");
+  const paused = vi.spyOn(bridge, "setPaused");
+  const write = vi.spyOn(bridge, "writeParameter");
+  const commit = vi.spyOn(bridge, "commitParameters");
+  render(<AppProviders bridge={bridge}><App /></AppProviders>);
+  await act(async () => undefined);
+
+  fireEvent.click(screen.getByRole("button", { name: "赛道模式" }));
+  expect(screen.getByTestId("workbench-layout")).toHaveAttribute("data-workbench-mode", "track");
+  expect(subscription).not.toHaveBeenCalled();
+  expect(paused).not.toHaveBeenCalled();
+  expect(write).not.toHaveBeenCalled();
+  expect(commit).not.toHaveBeenCalled();
+});
 
 it("runs the B-to-A tuning flow with permissions, RAM truth, and commit review", async () => {
   window.history.pushState({}, "", "/live/car-01");
@@ -23,9 +45,7 @@ it("runs the B-to-A tuning flow with permissions, RAM truth, and commit review",
   expect(screen.getByRole("heading", { name: "实时调参与波形" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "参数目录" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "实时波形" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "波形记录" }));
-  expect(await screen.findByRole("dialog", { name: "波形记录库" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "关闭波形记录库" }));
+  expect(screen.getByRole("link", { name: "打开波形记录库" })).toHaveAttribute("href", "/records");
   expect(screen.getByText("本地演示权限，不是远程安全边界")).toBeInTheDocument();
 
   await connectSimulator();

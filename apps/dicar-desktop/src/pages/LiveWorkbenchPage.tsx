@@ -1,4 +1,4 @@
-import { BookmarksSimple, Robot, WaveSine } from "@phosphor-icons/react";
+import { WaveSine } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AutoTuneWizard } from "../components/workbench/AutoTuneWizard";
 import { ChangeBar } from "../components/workbench/ChangeBar";
@@ -9,14 +9,16 @@ import { LeasePanel } from "../components/workbench/LeasePanel";
 import { ParameterEditor } from "../components/workbench/ParameterEditor";
 import { ParameterNav } from "../components/workbench/ParameterNav";
 import { SnapshotManagerDialog } from "../components/workbench/SnapshotManagerDialog";
-import { RecordingManagerDialog } from "../components/workbench/RecordingManagerDialog";
-import { RecordingPlaybackDialog } from "../components/workbench/RecordingPlaybackDialog";
 import { TypedParameterControl } from "../components/workbench/TypedParameterControl";
 import { WaveformPanel } from "../components/workbench/WaveformPanel";
 import type { WaveformSelectionRequest } from "../components/workbench/WaveformPanel";
+import { WorkbenchContextActions } from "../components/workbench/WorkbenchContextActions";
+import { WorkbenchLayout } from "../components/workbench/WorkbenchLayout";
+import { WorkbenchModeSwitch } from "../components/workbench/WorkbenchModeSwitch";
 import { WorkspaceNav, type WorkspaceTask } from "../components/workbench/WorkspaceNav";
 import type { ParameterSnapshot } from "../domain/types";
 import { useConnectionStore } from "../stores/connectionStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { useVehicleProfileStore } from "../stores/vehicleProfileStore";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 import { namespaceProfileWorkgroups } from "../telemetry/telemetryWorkgroups";
@@ -25,6 +27,7 @@ import { genericVehicleWorkspace, resolveVehicleWorkspace } from "../vehicleProf
 
 export function LiveWorkbenchPage() {
   const snapshot = useConnectionStore((state) => state.snapshot);
+  const workbenchMode = useSettingsStore((state) => state.workbenchMode);
   const buffer = useWorkspaceStore((state) => state.buffer);
   const selectedProfileId = useVehicleProfileStore((state) => state.selectedProfileId);
   const userProfiles = useVehicleProfileStore((state) => state.userProfiles);
@@ -44,8 +47,6 @@ export function LiveWorkbenchPage() {
   const [selectedParamId, setSelectedParamId] = useState<number | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
-  const [recordingsOpen, setRecordingsOpen] = useState(false);
-  const [playbackRecordingId, setPlaybackRecordingId] = useState<string | null>(null);
   const [autoTuneOpen, setAutoTuneOpen] = useState(false);
   const [waveformRequest, setWaveformRequest] = useState<WaveformSelectionRequest | null>(null);
   const requestId = useRef(0);
@@ -92,18 +93,17 @@ export function LiveWorkbenchPage() {
   }
 
   return <main className="w-full px-3 py-4 lg:px-5" id="main-content">
-    <header className="mb-4 flex flex-wrap items-end justify-between gap-3"><div className="flex items-center gap-3"><WaveSine className="text-(--interactive)" size={28} /><div><h1 className="m-0 text-xl">实时调参与波形</h1><p className="m-0 mt-1 text-xs text-(--text-muted)">{workspace.displayName} · {records.length} 个设备参数 · {telemetry.length} 个遥测通道</p></div></div><div className="flex items-center gap-3"><button className="inline-flex cursor-pointer items-center gap-1.5 rounded border border-(--border) bg-transparent px-2.5 py-1.5 text-xs text-(--text) hover:border-(--interactive)" onClick={() => setAutoTuneOpen(true)} type="button"><Robot size={15} />AI 调参</button><button className="inline-flex cursor-pointer items-center gap-1.5 rounded border border-(--border) bg-transparent px-2.5 py-1.5 text-xs text-(--text) hover:border-(--interactive)" onClick={() => setSnapshotsOpen(true)} type="button"><BookmarksSimple size={15} />参数方案</button><button className="inline-flex cursor-pointer items-center gap-1.5 rounded border border-(--border) bg-transparent px-2.5 py-1.5 text-xs text-(--text) hover:border-(--interactive)" onClick={() => setRecordingsOpen(true)} type="button"><WaveSine size={15} />波形记录</button><div className="font-mono text-[10px] text-(--text-muted)">RAM ≠ FLASH · ACK TRUTH · REV {snapshot?.revision ?? 0}</div></div></header>
+    <header className="mb-4 flex flex-wrap items-end justify-between gap-3"><div className="flex items-center gap-3"><WaveSine className="text-(--interactive)" size={28} /><div><h1 className="m-0 text-xl">实时调参与波形</h1><p className="m-0 mt-1 text-xs text-(--text-muted)">{workspace.displayName} · {records.length} 个设备参数 · {telemetry.length} 个遥测通道</p></div></div><div className="flex flex-wrap items-center justify-end gap-2"><WorkbenchModeSwitch /><WorkbenchContextActions onOpenAutoTune={() => setAutoTuneOpen(true)} onOpenSnapshots={() => setSnapshotsOpen(true)} revision={snapshot?.revision ?? 0} /></div></header>
     <LeasePanel />
-    <div className="mt-3 grid min-h-[560px] gap-3 xl:grid-cols-[264px_minmax(420px,1fr)_minmax(440px,1.15fr)]">
-      <div className="space-y-3"><WorkspaceNav onSelectTask={chooseTask} records={records} selectedTask={selectedTask} workspace={workspace} />{(selectedTask.kind === "all" || selectedTask.kind === "group") && <ParameterNav onSelectGroup={chooseGroup} onSelectParameter={setSelectedParamId} records={selectedTask.kind === "group" ? records.filter((record) => record.group === selectedTask.id) : records} selectedGroup={selectedGroup} selectedParamId={selectedParamId} />}</div>
-      <TaskEditor buffer={buffer} records={records} selectedGroup={selectedGroup} selectedRecord={selectedRecord} task={selectedTask} telemetry={telemetry} workspace={workspace} />
-      <WaveformPanel descriptors={telemetry} profileWorkgroups={workspace.profileId === GENERIC_PROFILE_ID ? [] : namespaceProfileWorkgroups(workspace.scopePresets)} selectionRequest={waveformRequest} />
-    </div>
+    <WorkbenchLayout
+      editor={<TaskEditor buffer={buffer} records={records} selectedGroup={selectedGroup} selectedRecord={selectedRecord} task={selectedTask} telemetry={telemetry} workspace={workspace} />}
+      mode={workbenchMode}
+      navigation={<><WorkspaceNav onSelectTask={chooseTask} records={records} selectedTask={selectedTask} workspace={workspace} />{(selectedTask.kind === "all" || selectedTask.kind === "group") && <ParameterNav onSelectGroup={chooseGroup} onSelectParameter={setSelectedParamId} records={selectedTask.kind === "group" ? records.filter((record) => record.group === selectedTask.id) : records} selectedGroup={selectedGroup} selectedParamId={selectedParamId} />}</>}
+      waveform={<WaveformPanel descriptors={telemetry} profileWorkgroups={workspace.profileId === GENERIC_PROFILE_ID ? [] : namespaceProfileWorkgroups(workspace.scopePresets)} selectionRequest={waveformRequest} />}
+    />
     <ChangeBar dirtyCount={dirty.length} onReview={() => setReviewOpen(true)} />
     <CommitReviewDialog onClose={() => setReviewOpen(false)} open={reviewOpen} records={dirty} />
     <SnapshotManagerDialog onClose={() => setSnapshotsOpen(false)} open={snapshotsOpen} />
-    <RecordingManagerDialog onClose={() => setRecordingsOpen(false)} onReplay={(recordingId) => { setRecordingsOpen(false); setPlaybackRecordingId(recordingId); }} open={recordingsOpen} />
-    <RecordingPlaybackDialog onClose={() => setPlaybackRecordingId(null)} open={playbackRecordingId !== null} recordingId={playbackRecordingId} />
     <AutoTuneWizard onClose={() => setAutoTuneOpen(false)} open={autoTuneOpen} records={records} workspace={workspace} />
   </main>;
 }
