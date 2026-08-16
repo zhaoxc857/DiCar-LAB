@@ -80,7 +80,7 @@ export function LiveWorkbenchPage() {
   const dirty = records.filter(({ dirty }) => dirty);
   function closeSnapshots() {
     setSnapshotsOpen(false);
-    if (searchParams.get("panel") !== "snapshots") return;
+    if (searchParams.get("panel") === null) return;
     const next = new URLSearchParams(searchParams);
     next.delete("panel");
     setSearchParams(next, { replace: true });

@@ -41,7 +41,7 @@ export function FirmwareFlashEntry({
       <p aria-live="polite" className="m-0 mt-3 text-xs text-(--text-muted)">{stateLabel}</p>
       <Button
         className="mt-3 w-full"
-        disabled={unavailable}
+        disabled={unavailable || onOpenFirmwareFlash === undefined}
         onClick={onOpenFirmwareFlash}
         variant="secondary"
       >

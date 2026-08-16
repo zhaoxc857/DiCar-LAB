@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes } from "react";
 import { cn } from "../../lib/cn";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "secondary" | "danger";
+  variant?: "primary" | "secondary" | "danger" | "ghost";
   size?: "sm" | "md";
 };
 
@@ -15,6 +15,7 @@ export function Button({ className, variant = "primary", size = "md", ...props }
         variant === "primary" && "border-(--interactive) bg-(--interactive) text-(--background) hover:bg-(--interactive-strong)",
         variant === "secondary" && "border-(--border) bg-(--surface-raised) text-(--text) hover:border-(--interactive)",
         variant === "danger" && "border-(--danger) bg-transparent text-(--danger) hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]",
+        variant === "ghost" && "border-transparent bg-transparent text-(--text) hover:bg-(--surface-raised)",
         className,
       )}
       {...props}

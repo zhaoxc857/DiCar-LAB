@@ -27,4 +27,6 @@ it.each([
 ] as const)("labels the reserved wireless flash state %j", (state, label) => {
   render(<FirmwareFlashEntry firmwareVersion={null} state={state} />);
   expect(screen.getByText(label)).toBeInTheDocument();
+  // 没有回调时按钮必须禁用，避免出现可点击但无动作的状态。
+  expect(screen.getByRole("button", { name: "打开无线烧录" })).toBeDisabled();
 });

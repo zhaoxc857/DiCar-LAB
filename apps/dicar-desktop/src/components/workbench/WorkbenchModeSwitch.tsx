@@ -14,21 +14,21 @@ export function WorkbenchModeSwitch() {
     >
       <Button
         aria-pressed={mode === "standard"}
-        className={mode === "standard" ? "border-(--interactive) bg-[color-mix(in_srgb,var(--interactive)_12%,var(--surface-raised))] text-(--interactive)" : "border-transparent bg-transparent"}
+        className={mode === "standard" ? "border-(--interactive) bg-[color-mix(in_srgb,var(--interactive)_12%,var(--surface-raised))] text-(--interactive)" : "text-(--text-muted)"}
         onClick={() => saveWorkbenchMode("standard")}
         size="sm"
         type="button"
-        variant="secondary"
+        variant="ghost"
       >
         <SquaresFour aria-hidden="true" size={14} />标准模式
       </Button>
       <Button
         aria-pressed={mode === "track"}
-        className={mode === "track" ? "border-(--interactive) bg-[color-mix(in_srgb,var(--interactive)_12%,var(--surface-raised))] text-(--interactive)" : "border-transparent bg-transparent"}
+        className={mode === "track" ? "border-(--interactive) bg-[color-mix(in_srgb,var(--interactive)_12%,var(--surface-raised))] text-(--interactive)" : "text-(--text-muted)"}
         onClick={() => saveWorkbenchMode("track")}
         size="sm"
         type="button"
-        variant="secondary"
+        variant="ghost"
       >
         <Gauge aria-hidden="true" size={14} />赛道模式
       </Button>
