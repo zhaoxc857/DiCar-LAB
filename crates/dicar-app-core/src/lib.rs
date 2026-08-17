@@ -3,6 +3,7 @@ mod actor;
 mod bridge_model;
 mod clock;
 mod error;
+mod firmware_flash;
 mod hardware_profile;
 mod link_budget;
 mod model;
@@ -23,6 +24,7 @@ pub use bridge_model::{
 };
 pub use clock::{Clock, FixedNonce, NonceSource, SystemClock, SystemNonce, TestClock};
 pub use error::{CoreError, TransportError};
+pub use firmware_flash::{validate_firmware_flash_start, FirmwareFlashStartError};
 pub use hardware_profile::{SerialHardwareProfile, TelemetryBudget};
 pub use link_budget::{link_budget, validate_subscription, LinkBudgetError, LinkBudgetSnapshot};
 pub use model::{ConnectedDevice, ConnectionPhase, DeviceIdentity, DiagnosticsSnapshot};

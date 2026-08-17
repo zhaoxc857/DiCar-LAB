@@ -6,8 +6,9 @@ use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dctp_protocol::{
-    encode_frame, CapabilityFlags, Frame, FrameFlags, Hello, HelloAck, MessageType, ParamCommitAck,
-    ParamState, ParamValue, ParamWrite, TelemetryBatch, TelemetrySample, WireEncode,
+    encode_frame, BootloaderProtocol, CapabilityFlags, FirmwareTargetId, Frame, FrameFlags, Hello,
+    HelloAck, MessageType, ParamCommitAck, ParamState, ParamValue, ParamWrite, PrepareFlash,
+    PrepareFlashAck, TelemetryBatch, TelemetrySample, WireEncode,
 };
 use sha2::{Digest, Sha256};
 
@@ -119,6 +120,22 @@ fn build_vectors() -> Result<Vec<Vector>, dctp_protocol::ProtocolError> {
             },
         ],
     };
+    let prepare_flash = PrepareFlash {
+        operation_id: [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ],
+        target_id: FirmwareTargetId::LCKFB_TMX_MSPM0G3507,
+        firmware_version: [2, 3, 4],
+        image_len: 0x1_2345,
+        image_sha256: [0xA6; 32],
+    };
+    let prepare_flash_ack = PrepareFlashAck {
+        operation_id: prepare_flash.operation_id,
+        bootloader_protocol: BootloaderProtocol::TI_MSPM0_ROM_BSL_UART,
+        entry_delay_ms: 250,
+        initial_baud: 9_600,
+    };
 
     Ok(vec![
         Vector {
@@ -185,6 +202,28 @@ fn build_vectors() -> Result<Vec<Vector>, dctp_protocol::ProtocolError> {
                 0x1004,
                 0xA1B2_C3D4,
                 telemetry.encode()?,
+            )?)?,
+        },
+        Vector {
+            file: "prepare-flash.bin",
+            description: "PREPARE_FLASH for the Tianmengxing MSPM0G3507 target",
+            bytes: encode_frame(&Frame::new(
+                MessageType::PrepareFlash,
+                FrameFlags::ACK_REQUIRED,
+                0x1005,
+                0xA1B2_C3D4,
+                prepare_flash.encode()?,
+            )?)?,
+        },
+        Vector {
+            file: "prepare-flash-ack.bin",
+            description: "PREPARE_FLASH_ACK for TI MSPM0 ROM BSL UART at 9600 baud",
+            bytes: encode_frame(&Frame::new(
+                MessageType::PrepareFlashAck,
+                FrameFlags::RESPONSE,
+                0x1005,
+                0xA1B2_C3D4,
+                prepare_flash_ack.encode()?,
             )?)?,
         },
     ])
@@ -291,7 +330,7 @@ mod tests {
     use super::build_vectors;
 
     #[test]
-    fn fixed_messages_produce_the_six_named_vectors() {
+    fn fixed_messages_produce_the_eight_named_vectors() {
         let vectors = build_vectors().unwrap();
         assert_eq!(
             vectors.iter().map(|vector| vector.file).collect::<Vec<_>>(),
@@ -302,6 +341,8 @@ mod tests {
                 "param-value.bin",
                 "param-commit-ack.bin",
                 "telemetry-mixed.bin",
+                "prepare-flash.bin",
+                "prepare-flash-ack.bin",
             ]
         );
         assert!(vectors.iter().all(|vector| vector.bytes.last() == Some(&0)));

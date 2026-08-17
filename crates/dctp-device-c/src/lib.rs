@@ -16,6 +16,7 @@ extern "C" {
         memory: *mut c_void,
         with_persist: c_int,
         with_tx_budget: c_int,
+        with_flash: c_int,
     ) -> *mut c_void;
     fn dctp_shim_rx(shim: *mut c_void, bytes: *const u8, len: usize, now_ms: u32);
     fn dctp_shim_poll(shim: *mut c_void, now_ms: u32, now_us: u32);
@@ -27,6 +28,14 @@ extern "C" {
     fn dctp_shim_manifest_crc32(shim: *const c_void) -> u32;
     fn dctp_shim_storage_generation(shim: *const c_void) -> u32;
     fn dctp_shim_session_active(shim: *const c_void) -> c_int;
+    fn dctp_shim_prepare_flash_calls(shim: *const c_void) -> u32;
+    fn dctp_shim_take_flash_transition(
+        shim: *mut c_void,
+        operation_id: *mut u8,
+        protocol: *mut u8,
+        entry_delay_ms: *mut u16,
+        initial_baud: *mut u32,
+    ) -> c_int;
     fn dctp_shim_log(
         shim: *mut c_void,
         severity: u8,
@@ -57,6 +66,14 @@ pub struct TestDevice {
     shim: *mut c_void,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FlashTransition {
+    pub operation_id: [u8; 16],
+    pub bootloader_protocol: u8,
+    pub entry_delay_ms: u16,
+    pub initial_baud: u32,
+}
+
 impl TestDevice {
     pub fn new(with_persist: bool, with_tx_budget: bool) -> Self {
         let size = unsafe { dctp_shim_size() };
@@ -67,11 +84,27 @@ impl TestDevice {
                 memory.as_mut_ptr().cast(),
                 c_int::from(with_persist),
                 c_int::from(with_tx_budget),
+                0,
             )
         };
         assert!(
             !shim.is_null(),
             "C device rejected the fixed descriptor tables"
+        );
+        Self {
+            _memory: memory,
+            shim,
+        }
+    }
+
+    pub fn new_with_flash() -> Self {
+        let size = unsafe { dctp_shim_size() };
+        let words = size.div_ceil(8);
+        let mut memory = vec![0u64; words];
+        let shim = unsafe { dctp_shim_init(memory.as_mut_ptr().cast(), 0, 0, 1) };
+        assert!(
+            !shim.is_null(),
+            "C device rejected the flash-enabled config"
         );
         Self {
             _memory: memory,
@@ -123,6 +156,32 @@ impl TestDevice {
 
     pub fn session_active(&self) -> bool {
         unsafe { dctp_shim_session_active(self.shim) != 0 }
+    }
+
+    pub fn prepare_flash_calls(&self) -> u32 {
+        unsafe { dctp_shim_prepare_flash_calls(self.shim) }
+    }
+
+    pub fn take_flash_transition(&mut self) -> Option<FlashTransition> {
+        let mut operation_id = [0u8; 16];
+        let mut bootloader_protocol = 0u8;
+        let mut entry_delay_ms = 0u16;
+        let mut initial_baud = 0u32;
+        let available = unsafe {
+            dctp_shim_take_flash_transition(
+                self.shim,
+                operation_id.as_mut_ptr(),
+                &mut bootloader_protocol,
+                &mut entry_delay_ms,
+                &mut initial_baud,
+            )
+        };
+        (available != 0).then_some(FlashTransition {
+            operation_id,
+            bootloader_protocol,
+            entry_delay_ms,
+            initial_baud,
+        })
     }
 
     pub fn log(&mut self, severity: u8, module_id: u16, timestamp_us: u32, text: &str) -> bool {

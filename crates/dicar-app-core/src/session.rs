@@ -3,8 +3,8 @@ use std::collections::VecDeque;
 use dctp_protocol::{
     encode_frame, DeviceManifest, ErrorCode, ErrorPayload, Frame, FrameFlags, Heartbeat, Hello,
     HelloAck, ManifestAssembler, ManifestChunk, ManifestDone, MessageType, ParamCommit,
-    ParamCommitAck, ParamRead, ParamState, ParamValue, ParamWrite, ParamWriteAck, ProtocolError,
-    StreamDecoder, WireDecode, WireEncode, MAX_PAYLOAD_LEN,
+    ParamCommitAck, ParamRead, ParamState, ParamValue, ParamWrite, ParamWriteAck, PrepareFlash,
+    PrepareFlashAck, ProtocolError, StreamDecoder, WireDecode, WireEncode, MAX_PAYLOAD_LEN,
 };
 
 use crate::{
@@ -173,7 +173,7 @@ impl<T: Transport> ProtocolSession<T> {
     ) -> Result<Frame, CoreError> {
         if matches!(
             message_type,
-            MessageType::ParamWrite | MessageType::ParamCommit
+            MessageType::ParamWrite | MessageType::ParamCommit | MessageType::PrepareFlash
         ) {
             return Err(CoreError::UnauthorizedParameterOperation);
         }
@@ -227,6 +227,18 @@ impl<T: Transport> ProtocolSession<T> {
     fn commit_parameters(&mut self, commit: &ParamCommit) -> Result<ParamCommitAck, CoreError> {
         let response = self.request_internal(MessageType::ParamCommit, commit.encode()?)?;
         Ok(ParamCommitAck::decode(&response.payload)?)
+    }
+
+    pub fn prepare_firmware_flash(
+        &mut self,
+        request: &PrepareFlash,
+    ) -> Result<PrepareFlashAck, CoreError> {
+        let response = self.request_internal(MessageType::PrepareFlash, request.encode()?)?;
+        let ack = PrepareFlashAck::decode(&response.payload)?;
+        if ack.operation_id != request.operation_id {
+            return Err(ProtocolError::InvalidValue.into());
+        }
+        Ok(ack)
     }
 
     pub fn execute_write(

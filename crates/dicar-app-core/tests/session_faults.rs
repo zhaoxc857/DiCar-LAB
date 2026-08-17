@@ -3,10 +3,11 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use dctp_protocol::{
-    crc32_iso_hdlc, decode_packet, encode_frame, CapabilityFlags, DeviceManifest, ErrorCode,
-    ErrorPayload, Frame, FrameFlags, HelloAck, ManifestChunk, ManifestDone, MessageType,
-    ParamConstraints, ParamDescriptor, ParamFlags, ParamRead, ParamState, ParamType, ParamValue,
-    ParamWriteAck, WireDecode, WireEncode, MANIFEST_SCHEMA_VERSION,
+    crc32_iso_hdlc, decode_packet, encode_frame, BootloaderProtocol, CapabilityFlags,
+    DeviceManifest, ErrorCode, ErrorPayload, FirmwareTargetId, Frame, FrameFlags, HelloAck,
+    ManifestChunk, ManifestDone, MessageType, ParamConstraints, ParamDescriptor, ParamFlags,
+    ParamRead, ParamState, ParamType, ParamValue, ParamWriteAck, PrepareFlash, PrepareFlashAck,
+    ProtocolError, WireDecode, WireEncode, MANIFEST_SCHEMA_VERSION,
 };
 use dicar_app_core::{
     AccessProfile, AccessRole, Clock, CommitFailureKind, ConnectionPhase, CoreError, Endpoint,
@@ -43,6 +44,7 @@ struct FakeState {
     negotiated_max_payload: u16,
     empty_read_advance_ms: u64,
     refreshes_sent: u8,
+    flash_ack_operation_id: Option<[u8; 16]>,
 }
 
 #[derive(Clone)]
@@ -107,6 +109,10 @@ impl FakeControl {
     fn pending_read_bytes(&self) -> usize {
         self.0.lock().unwrap().reads.len()
     }
+
+    fn set_flash_ack_operation_id(&self, operation_id: [u8; 16]) {
+        self.0.lock().unwrap().flash_ack_operation_id = Some(operation_id);
+    }
 }
 
 struct FakeTransport {
@@ -126,6 +132,7 @@ impl FakeTransport {
             negotiated_max_payload: 64,
             empty_read_advance_ms: 0,
             refreshes_sent: 0,
+            flash_ack_operation_id: None,
         }));
         (
             Self {
@@ -349,7 +356,9 @@ fn response_for(state: &mut FakeState, request: &Frame) -> Vec<Frame> {
                 sdk_major: 4,
                 sdk_minor: 5,
                 sdk_patch: 6,
-                capabilities: CapabilityFlags::PARAMETERS | CapabilityFlags::PERSISTENCE,
+                capabilities: CapabilityFlags::PARAMETERS
+                    | CapabilityFlags::PERSISTENCE
+                    | CapabilityFlags::PREPARE_FLASH,
                 manifest_crc32: manifest.manifest_crc32().unwrap(),
                 max_payload: state.negotiated_max_payload,
             };
@@ -428,6 +437,22 @@ fn response_for(state: &mut FakeState, request: &Frame) -> Vec<Frame> {
             vec![0; 8],
             request.header.session_id,
         )],
+        MessageType::PrepareFlash => {
+            let prepare = PrepareFlash::decode(&request.payload).unwrap();
+            vec![response_frame(
+                request,
+                MessageType::PrepareFlashAck,
+                PrepareFlashAck {
+                    operation_id: state.flash_ack_operation_id.unwrap_or(prepare.operation_id),
+                    bootloader_protocol: BootloaderProtocol::TI_MSPM0_ROM_BSL_UART,
+                    entry_delay_ms: 250,
+                    initial_baud: 9_600,
+                }
+                .encode()
+                .unwrap(),
+                request.header.session_id,
+            )]
+        }
         MessageType::Heartbeat => vec![response_frame(
             request,
             MessageType::HeartbeatAck,
@@ -534,6 +559,52 @@ fn dirty_workspace(session: &ProtocolSession<FakeTransport>) -> ParameterWorkspa
         )
         .unwrap();
     workspace
+}
+
+fn prepare_flash_request() -> PrepareFlash {
+    PrepareFlash {
+        operation_id: [0xA5; 16],
+        target_id: FirmwareTargetId::LCKFB_TMX_MSPM0G3507,
+        firmware_version: [2, 1, 0],
+        image_len: 0x1_2345,
+        image_sha256: [0x5A; 32],
+    }
+}
+
+#[test]
+fn prepare_firmware_flash_roundtrips_the_typed_request_and_ack() {
+    let (mut session, control, _clock) = ready_session();
+    let request = prepare_flash_request();
+
+    let ack = session.prepare_firmware_flash(&request).unwrap();
+
+    assert_eq!(
+        ack,
+        PrepareFlashAck {
+            operation_id: request.operation_id,
+            bootloader_protocol: BootloaderProtocol::TI_MSPM0_ROM_BSL_UART,
+            entry_delay_ms: 250,
+            initial_baud: 9_600,
+        }
+    );
+    let frames = control.frames(MessageType::PrepareFlash);
+    assert_eq!(frames.len(), 1);
+    assert_eq!(PrepareFlash::decode(&frames[0].payload).unwrap(), request);
+}
+
+#[test]
+fn prepare_firmware_flash_rejects_an_ack_for_another_operation() {
+    let (mut session, control, _clock) = ready_session();
+    control.set_flash_ack_operation_id([0xC3; 16]);
+
+    let error = session
+        .prepare_firmware_flash(&prepare_flash_request())
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        CoreError::Protocol(ProtocolError::InvalidValue)
+    ));
 }
 
 #[test]

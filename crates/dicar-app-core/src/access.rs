@@ -51,4 +51,14 @@ impl AccessProfile {
         }
         PermissionDecision::Allowed
     }
+
+    pub const fn can_flash(self) -> PermissionDecision {
+        if !matches!(self.role, AccessRole::Owner) {
+            return PermissionDecision::Denied("当前身份没有固件烧录权限");
+        }
+        if matches!(self.lease, LeaseState::Inactive) {
+            return PermissionDecision::Denied("当前设备没有活动控制租约");
+        }
+        PermissionDecision::Allowed
+    }
 }

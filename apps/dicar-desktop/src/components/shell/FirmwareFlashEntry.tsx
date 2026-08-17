@@ -3,11 +3,14 @@ import { Button } from "../ui/button";
 
 export type FirmwareFlashUiState =
   | { kind: "unavailable" }
+  | { kind: "deviceRequired" }
   | { kind: "checking" }
   | { kind: "selecting" }
+  | { kind: "ready" }
   | { kind: "preparing" }
   | { kind: "flashing"; progressPercent: number }
   | { kind: "succeeded" }
+  | { kind: "recoveryRequired"; message: string }
   | { kind: "failed"; message: string };
 
 export type FirmwareFlashEntryProps = {
@@ -55,11 +58,14 @@ export function FirmwareFlashEntry({
 function firmwareFlashStateLabel(state: FirmwareFlashUiState): string {
   switch (state.kind) {
     case "unavailable": return "无线烧录尚未启用";
+    case "deviceRequired": return "请连接支持烧录的 9600 baud HC-05 / nanoUART-wl 设备";
     case "checking": return "正在检查设备";
     case "selecting": return "选择固件文件";
+    case "ready": return "固件包已验证，等待安全确认";
     case "preparing": return "正在准备烧录";
     case "flashing": return `烧录中 ${state.progressPercent}%`;
     case "succeeded": return "烧录成功";
+    case "recoveryRequired": return `等待恢复：${state.message}`;
     case "failed": return `烧录失败：${state.message}`;
   }
 }

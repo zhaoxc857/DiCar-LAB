@@ -3,12 +3,13 @@
 //! 每个测试构造真实的 DCTP 请求字节流喂给 C 实现，再用 dctp-protocol
 //! 解码响应并断言语义与 dctp-sim 的参考行为一致。
 
-use dctp_device_c::TestDevice;
+use dctp_device_c::{FlashTransition, TestDevice};
 use dctp_protocol::{
-    canonical_parameter_crc32, encode_frame, DeviceManifest, ErrorCode, ErrorPayload, Frame,
-    FrameFlags, Hello, HelloAck, LogMessage, LogSeverity, ManifestAssembler, ManifestChunk,
-    ManifestDone, MessageType, ParamCommit, ParamCommitAck, ParamCommitEntry, ParamState,
-    ParamValue, ParamWrite, ParamWriteAck, StreamDecoder, TelemetryBatch, TelemetrySubscription,
+    canonical_parameter_crc32, encode_frame, BootloaderProtocol, CapabilityFlags, DeviceManifest,
+    ErrorCode, ErrorPayload, FirmwareTargetId, Frame, FrameFlags, Hello, HelloAck, LogMessage,
+    LogSeverity, ManifestAssembler, ManifestChunk, ManifestDone, MessageType, ParamCommit,
+    ParamCommitAck, ParamCommitEntry, ParamState, ParamValue, ParamWrite, ParamWriteAck,
+    PrepareFlash, PrepareFlashAck, StreamDecoder, TelemetryBatch, TelemetrySubscription,
     WireDecode, WireEncode,
 };
 use dctp_sim::SimConfig;
@@ -969,6 +970,54 @@ fn unsupported_requests_and_bad_hello_are_rejected() {
         MessageType::Hello,
         ErrorCode::InvalidLength,
     );
+}
+
+#[test]
+fn prepare_flash_is_advertised_acked_once_and_exposes_a_one_shot_transition() {
+    let mut device = TestDevice::new_with_flash();
+    let hello = handshake(&mut device, 0);
+    assert!(hello.capabilities.contains(CapabilityFlags::PREPARE_FLASH));
+    let prepare = PrepareFlash {
+        operation_id: [0x42; 16],
+        target_id: FirmwareTargetId::LCKFB_TMX_MSPM0G3507,
+        firmware_version: [2, 3, 4],
+        image_len: 0x1_2345,
+        image_sha256: [0xA6; 32],
+    };
+    let request = reliable_request(
+        MessageType::PrepareFlash,
+        2,
+        hello.session_id,
+        prepare.encode().unwrap(),
+    );
+
+    device.rx(&request, 10);
+    let first = take_one(&mut device);
+    let ack = PrepareFlashAck::decode(&first.payload).unwrap();
+    assert_eq!(first.header.message_type, MessageType::PrepareFlashAck);
+    assert_eq!(ack.operation_id, prepare.operation_id);
+    assert_eq!(
+        ack.bootloader_protocol,
+        BootloaderProtocol::TI_MSPM0_ROM_BSL_UART
+    );
+    assert_eq!(ack.entry_delay_ms, 250);
+    assert_eq!(ack.initial_baud, 9_600);
+    assert_eq!(device.prepare_flash_calls(), 1);
+    assert_eq!(
+        device.take_flash_transition(),
+        Some(FlashTransition {
+            operation_id: prepare.operation_id,
+            bootloader_protocol: BootloaderProtocol::TI_MSPM0_ROM_BSL_UART.bits(),
+            entry_delay_ms: 250,
+            initial_baud: 9_600,
+        })
+    );
+    assert_eq!(device.take_flash_transition(), None);
+
+    device.rx(&request, 20);
+    assert_eq!(take_one(&mut device), first);
+    assert_eq!(device.prepare_flash_calls(), 1);
+    assert_eq!(device.take_flash_transition(), None);
 }
 
 #[test]

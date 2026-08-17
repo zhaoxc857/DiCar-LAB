@@ -1,10 +1,32 @@
-# DiCar Tune 开发交接（2026-08-15）
+# DiCar Tune 开发交接（2026-08-17）
 
 给新会话/新开发者的现状快照。读完本文 + 按需查阅引用文件，即可继续开发。
 
+## 0. 无线固件升级开发快照（2026-08-17）
+
+- 已通过规格评审并在 `codex/release-0.2.0` 实现天猛星 MSPM0G3507 首版软件链：
+  DCTP `PREPARE_FLASH`、签名 `.dicarfw`、TI ROM BSL、每设备凭据、恢复包、
+  AppState 独占锁、Tauri 命令和 React 向导。
+- HC-05/nanoUART-wl 在首版只作为 9600 8N1 透明链路；HC-05 本身不是烧录器。
+  设备 ACK 后串口从 DCTP Core 交给 ROM BSL，擦除后的失败只能重试或回滚。
+- 通用 C 库已支持可选 `prepare_flash` 回调；天猛星目标适配保证先安全停机、ACK
+  完整发送、再一次性 BOOTLOADER_ENTRY 复位。MSPM0 SDK 2.11.00.07 API 已按
+  本地 SDK 核对，但本机无 TI Arm Clang/Arm GCC，实板交叉编译尚未验证。
+- 当前自动化证据：44 个 Vitest 文件 / 194 项测试、Playwright 11/11；新增 Rust
+  协议、Core、包、BSL、凭据、恢复、Tauri 服务和 C 适配测试均通过；Clippy
+  `-D warnings`、lint、typecheck/build 已通过。
+- 8 个黄金向量已生成，Rust 生成器与 C 端逐字节复现测试均通过。
+- `release/` 0.2.0 安装版/便携版已于 2026-08-17 重建并包含无线烧录页面与后台。
+  天猛星+HC-05/nanoUART-wl 的正常
+  升级、擦除/写入中断、BSL+RST 恢复和回滚四项全部未做硬件验收，不得声称已支持。
+- 权威资料：
+  [无线烧录规格](docs/superpowers/specs/2026-08-16-mspm0-wireless-firmware-flashing-design.md)、
+  [实施计划](docs/superpowers/plans/2026-08-16-mspm0-wireless-firmware-flashing.md)、
+  [操作与恢复指南](docs/wireless-firmware-flashing.md)。
+
 - 当前实现分支：`codex/release-0.2.0`，从已验证基线 `3c556f0` 创建。规格提交 `b14495d`；安全 AI 提交 `938a101`、`354d019`；波形记录/回放提交 `443f4ce`、`8b43046`、`d3a699b`、`896144e`、`2a19f82`；精准控制台 UI 设计/计划提交 `42b5687`、`38d58e9`，实施与文档提交 `ebacc2a`、`b23a941`、`07a7d34`、`184b4c0`、`6e90766`、`0239e76`、`94ba3dd`、`6d9cc02`、`9580fe6`；旧首页/新工作台兼容提交 `b726327`。
 - 0.2.0 已完成门禁、NSIS/便携版构建、精确 PID/回环端口冒烟和 SHA-256 校验。发布文件位于 `release/`，校验值见 `release/SHA256SUMS.txt`。
-- 0.2.0 安装版与便携版已于 2026-08-15 重新构建并同步旧首页四入口与精准控制台工作台；本次未修改版本号、Rust/Tauri 后端逻辑、DCTP wire、消息 ID 或黄金向量。
+- 0.2.0 安装版与便携版已于 2026-08-17 再次构建，包含无线固件烧录页面、Tauri 固件服务、DCTP `PREPARE_FLASH` 与 8 个黄金向量；版本号保持 0.2.0。
 - 权威规格：[docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md](docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md)（DCTP v1 协议与分阶段计划）。
 - 开发文档：[docs/development.md](docs/development.md)（架构、环境、门禁、打包）；用户手册：[docs/user-guide.md](docs/user-guide.md)。
 
@@ -12,7 +34,8 @@
 
 后续工作只允许以下四类：
 
-1. **无线固件烧录**：下一项新增产品功能；当前只有禁用的前端入口和类型化状态接口，没有 Bridge/Tauri/Rust 后端。实施前必须先完成安全边界、失败恢复和兼容性设计，不得未经评审直接改变 DCTP wire 或黄金向量。
+1. **无线固件烧录**：软件首版已按评审规格实现；下一步是补齐黄金向量并完成
+   天猛星硬件门禁。不得在实板验收前重建或宣传发布支持。
 2. **nanoUART-wl / HC-05 实体环境验证**：软件适配已完成；只有用户明确确认硬件准备好后才开始实测、资格验证和对应修复。
 3. **完善现有功能与 UI**：允许改进当前调参、遥测、AI、记录回放、诊断和易用性，但不借机加入新的平台或云端产品范围。
 4. **及时清理过期文件**：每个里程碑审计旧发布物、临时输出、失效文档和被替代资产；只删除已核实目标，优先采用可恢复操作。精准控制台阶段已删除旧占位页和旧连接栏，临时视觉审计用例与产物也已清理。
@@ -59,12 +82,15 @@
 - 顶部保留“概览、实时调试、波形记录、诊断”四个真实入口；首页恢复 2×2 的“实时调参与波形、数据记录与回放、参数方案、连接与链路诊断”四卡信息架构，并保留当前车辆和最近记录摘要。
 - 设备状态芯片打开 `ConnectionDrawer`，连接、硬件指南和车型偏好集中在唯一抽屉。旧 `ConnectionStatusBar` 和占位页保持删除，不恢复第二套连接状态。
 - 参数方案卡进入 `/live?panel=snapshots` 并复用现有 `SnapshotManagerDialog`；旧 `/parameter-sets` 书签使用 replace 重定向到同一入口，关闭面板会清理 `panel` 且保留其他查询参数。
-- `FirmwareFlashEntry` 已预留 `unavailable / ready / preparing / transferring / verifying / succeeded / failed` 前端状态接口，但当前固定为 `unavailable`，没有后端绑定，不能选择或传输固件。
+- `FirmwareFlashEntry` 已接入独立固件向导与 Tauri Firmware service；只有已就绪的
+  HC-05/nanoUART-wl 9600 baud 真实串口可打开，浏览器保持 unavailable。
 - `/records` 是真实独立页面，复用既有 `RecordingController`；首页摘要只显示真实设备/车型/固件/参数/遥测/存储代和最近完整记录，四张卡均指向可执行的真实能力。
 - 实时工作台提供标准/赛道模式，DOM 顺序和组件实例不变；模式切换只改布局密度，测试确认不会发送订阅、暂停、写参数或固化命令。实时指标条只读取现有目标/反馈/误差/订阅/丢样/RTT，缺值为“—”；零 dirty 时不渲染底部变更条。
 - 诊断按设备健康、连接质量、协议事件组织现有快照，原始计数折叠展示；窄屏导航、焦点环、减弱动效和明确的触控尺寸已覆盖。
-- 当前门禁为 42 个 Vitest 文件 / 187 项测试和 11 个 Playwright 场景；覆盖四卡首页的桌面 2×2/窄屏单列、参数方案新旧 URL、设备抽屉、双模式状态保持、独立记录页、录制/封存/回放/下载、窄屏键盘导航和 axe。
-- 本阶段只修改 React/TypeScript/CSS/HTML、测试和文档；`DesktopBridge` 后端行为、Rust/Tauri、DCTP wire、消息 ID 和黄金向量均未改变。
+- 当前门禁为 44 个 Vitest 文件 / 194 项测试和 11 个既有 Playwright 场景；新增
+  固件向导由 Vitest 覆盖，真实串口和 ROM BSL 不进入浏览器 E2E。
+- 无线烧录阶段已经修改 Rust/Tauri、DCTP wire、C 参考库与 React；普通参数与
+  遥测语义保持不变。新增黄金向量尚待用户确认后落盘。
 
 ## 3. 0.2.0 发布状态
 
@@ -73,13 +99,14 @@
 - 最终 `release/` 便携版隐藏启动冒烟：精确 PID 3336 持续响应并拥有 `127.0.0.1:63056`，随后只终止该 PID并确认退出。
 - 两个 0.1.2 实体文件在 0.2.0 全部检查成功后移入 Windows 回收站；`release/` 现在只保留两个 0.2.0 产物和校验清单。
 
-参数方案导入明确不属于 0.2.0，也不再列入后续待办。无线烧录是下一项开发；nanoUART-wl/HC-05 实板验证必须等用户确认硬件就绪。云协作、macOS/Linux/移动端等仍不在范围内。
+参数方案导入明确不属于 0.2.0，也不再列入后续待办。无线烧录软件首版已实现；
+nanoUART-wl/HC-05 与天猛星实板验证仍未执行。云协作、macOS/Linux/移动端等仍不在范围内。
 
 ## 4. 环境与门禁（Windows 11，本机已验证）
 
 - pnpm 全局可用；Node 26 兼容（`.node-version` 仅作推荐）；`git safe.directory` 已配置；MSVC 工具链可用（cc crate 编译 C 库依赖它）。
-- 前端门禁（在 `apps/dicar-desktop/` 或用 `--filter`）：`pnpm lint`、`pnpm typecheck`、`pnpm test -- --run`、`pnpm build`、`pnpm test:e2e`。最近基线为 42 个 Vitest 文件 / 187 个测试、11 个 Playwright 场景。
-- Rust 门禁（仓库根）：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（含 C 交叉验证）、Tauri `native-check`、`cargo run -p dctp-sim --bin generate_vectors -- --check`（六个黄金向量）。
+- 前端门禁（在 `apps/dicar-desktop/` 或用 `--filter`）：`pnpm lint`、`pnpm typecheck`、`pnpm test -- --run`、`pnpm build`、`pnpm test:e2e`。最近 Vitest 基线为 44 个文件 / 194 个测试，既有 Playwright 为 11 个场景。
+- Rust 门禁（仓库根）：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（含 C 交叉验证）、Tauri `native-check`、`cargo run -p dctp-sim --bin generate_vectors -- --check`（目标为八个黄金向量）。
 - 本机 Smart App Control 会误拦个别 Cargo 中间产物哈希；未关闭安全策略。测试目标用等价的包级命令补齐，向量检查使用 release profile，打包仅设置 `CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG=1` 改变 build script 哈希。
 - AI 覆盖使用内存凭据替身和本地 HTTP server；前端/Playwright 使用 Mock，不访问真实 DeepSeek。记录域使用 `fake-indexeddb` 覆盖原子导入、清理、失败回滚和容量边界。
 - 全绿是提交前提；rustfmt 对新 Rust 代码常需先 `cargo fmt --all`。
@@ -97,7 +124,8 @@
 
 1. 读本文件。
 2. `git log --oneline -15` 对照第 2 节确认基线未漂移。
-3. 下一项是“无线固件烧录后端与硬件流程”：先写安全边界、失败恢复、兼容性和升级状态机规格，评审后再生成实施计划。
-4. 无线烧录设计不得假定透明串口模块自带 Bootloader；必须明确目标 MCU、进入升级模式的方法、镜像格式、签名/校验、断电恢复和回滚能力。
-5. nanoUART-wl/HC-05 实体环境验证排在无线烧录之后，且只有用户确认硬件准备好才开始。
+3. 先完成八个黄金向量落盘与全量门禁，再进入实体硬件验证；不重建当前发布产物。
+4. 实板按正常升级、擦除/写入中断、BSL+RST 恢复和回滚四项记录证据，任何一项
+   未跑都保持“未验证”。
+5. MSPM0G3519 与 STM32F1/F4 不在首版实现范围；需要独立目标适配和测试。
 6. 如需改协议/C 库，先重读第 5 节和规格对应章节。

@@ -10,9 +10,10 @@
   Rust 协议栈对本库做逐字节交叉校验。
 - 已实现：会话（HELLO/心跳/关闭/3000 ms 失效）、Manifest 分片、参数读写与
   Revision 冲突、Flash 固化（canonical CRC32 + A/B 双槽 + 幂等 ACK）、
-  1–8 通道遥测批次、结构化日志、可靠请求幂等缓存（32 项）。
-- 未实现：`PREPARE_FLASH`（返回 `UNKNOWN_MESSAGE`，与内置模拟器一致；
-  无线烧录协调属于后续阶段）。
+  1–8 通道遥测批次、结构化日志、可靠请求幂等缓存（32 项），以及由目标平台
+  回调启用的 `PREPARE_FLASH` 安全切换。
+- 未配置 `prepare_flash` 回调时，设备不上报无线烧录能力并拒绝切换。首个目标
+  适配位于 `firmware/targets/lckfb-tmx-mspm0g3507/`。
 
 ## 1. 最小接入
 
@@ -79,6 +80,7 @@ void app_main_loop(void) {
 | `write` | 是 | 把整段字节交给 UART 发送路径。可靠响应经此发出，必须被完整接受：要么发送环形缓冲足够大（建议 ≥ 2 KiB），要么在此阻塞到放完。不得在回调里丢弃部分字节。 |
 | `tx_free` | 否 | 返回发送路径当前可接受的字节数。遥测批次与日志在发送前检查；空间不足时整帧丢弃并计入缺口，绝不发半帧，保证 P0/P1 响应不被 P2/P3 挤占。传 NULL 表示不限制。 |
 | `persist` | 否 | 收到完整槽记录（`DCTP_STORAGE_BLOB_MAX` 以内）。实现应写入**非活动**槽、读回校验，成功返回 `DCTP_PERSIST_OK`。写失败返回 `DCTP_PERSIST_STORAGE_FAILED`，读回不一致返回 `DCTP_PERSIST_VERIFY_FAILED`。库只有在成功后才更新 Flash 影子值并递增 Generation；同一请求重试由幂等缓存保证不会写两次。传 NULL 时设备不上报 PERSISTENCE 能力。 |
+| `prepare_flash` | 否 | 先让车辆安全停机，再填写一次性 ROM BSL 切换参数。ACK 必须完整发出后，应用才可消费 `dctp_device_take_flash_transition` 并复位。传 NULL 时设备不上报 `PREPARE_FLASH` 能力。 |
 
 时钟：`now_ms` 用于会话 3000 ms 失效（单调毫秒，可回绕）；`now_us` 用于遥测
 节拍（单调微秒，可回绕，两次 `poll` 间隔不得超过半个回绕周期——实践中只需
@@ -151,9 +153,12 @@ AI 仍只写 RAM；稳定结果是否固化到 Flash 必须由操作者人工审
 
 `crates/dctp-device-c` 把本目录的 C 源编译进 Rust 测试并做两类校验：
 
-- `tests/golden.rs`：C 编码器复刻 `test-vectors/dctp-v1/` 的六个黄金帧，逐字节比对。
+- `tests/golden.rs`：C 编码器复刻 `test-vectors/dctp-v1/` 的八个黄金帧，逐字节比对。
 - `tests/behavior.rs`：Rust 协议栈构造请求驱动 C 设备，覆盖握手、重放、
-  幂等、参数校验链、固化原子性、遥测节拍与丢弃、超时与重同步等 20 个场景。
+  幂等、参数校验链、固化原子性、遥测节拍与丢弃、超时、重同步和烧录切换等
+  21 个场景。
+- `tests/target_flash_adapter.rs`：验证天猛星先安全停机、ACK 后等待 UART 清空，
+  再一次性进入 TI ROM BSL 的调用顺序。
 
 修改本库后运行：
 

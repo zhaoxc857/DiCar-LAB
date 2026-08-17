@@ -102,6 +102,7 @@ typedef struct {
   uint8_t persist_blob[DCTP_STORAGE_BLOB_MAX];
   uint32_t persist_blob_len;
   uint32_t channel_reads;
+  uint32_t prepare_flash_calls;
 } dctp_shim_t;
 
 static uint32_t read_channel_value(void *user) {
@@ -133,11 +134,24 @@ static int shim_persist(void *user, const uint8_t *blob, uint32_t len) {
   return shim->persist_result;
 }
 
+static bool shim_prepare_flash(void *user, const dctp_prepare_flash_request_t *request,
+                               dctp_flash_transition_t *transition) {
+  dctp_shim_t *shim = (dctp_shim_t *)user;
+  shim->prepare_flash_calls += 1;
+  if (request->target_id != DCTP_FIRMWARE_TARGET_LCKFB_TMX_MSPM0G3507) {
+    return false;
+  }
+  transition->bootloader_protocol = DCTP_BOOTLOADER_TI_MSPM0_ROM_BSL_UART;
+  transition->entry_delay_ms = 250u;
+  transition->initial_baud = 9600u;
+  return true;
+}
+
 size_t dctp_shim_size(void) {
   return sizeof(dctp_shim_t);
 }
 
-dctp_shim_t *dctp_shim_init(void *memory, int with_persist, int with_tx_budget) {
+dctp_shim_t *dctp_shim_init(void *memory, int with_persist, int with_tx_budget, int with_flash) {
   dctp_shim_t *shim = (dctp_shim_t *)memory;
   memset(shim, 0, sizeof *shim);
   shim->tx_free_bytes = 0;
@@ -158,6 +172,7 @@ dctp_shim_t *dctp_shim_init(void *memory, int with_persist, int with_tx_budget) 
   config.write = shim_write;
   config.tx_free = with_tx_budget != 0 ? shim_tx_free : NULL;
   config.persist = with_persist != 0 ? shim_persist : NULL;
+  config.prepare_flash = with_flash != 0 ? shim_prepare_flash : NULL;
   config.user = shim;
 
   if (!dctp_device_init(&shim->device, &config)) {
@@ -209,6 +224,24 @@ uint32_t dctp_shim_storage_generation(const dctp_shim_t *shim) {
 
 int dctp_shim_session_active(const dctp_shim_t *shim) {
   return dctp_device_session_active(&shim->device) ? 1 : 0;
+}
+
+uint32_t dctp_shim_prepare_flash_calls(const dctp_shim_t *shim) {
+  return shim->prepare_flash_calls;
+}
+
+int dctp_shim_take_flash_transition(dctp_shim_t *shim, uint8_t *operation_id,
+                                    uint8_t *protocol, uint16_t *entry_delay_ms,
+                                    uint32_t *initial_baud) {
+  dctp_flash_transition_t transition;
+  if (!dctp_device_take_flash_transition(&shim->device, &transition)) {
+    return 0;
+  }
+  memcpy(operation_id, transition.operation_id, DCTP_FLASH_OPERATION_ID_LEN);
+  *protocol = transition.bootloader_protocol;
+  *entry_delay_ms = transition.entry_delay_ms;
+  *initial_baud = transition.initial_baud;
+  return 1;
 }
 
 int dctp_shim_log(dctp_shim_t *shim, uint8_t severity, uint16_t module_id, uint32_t timestamp_us,
@@ -351,6 +384,31 @@ size_t dctp_shim_build_golden(int which, uint8_t *out, size_t capacity) {
       dctp_put_u32(&writer, 9);
       dctp_put_u32(&writer, 0x1u);
       return emit_golden_frame(DCTP_MSG_TELEMETRY_DATA, 0, 0x1004, 0xA1B2C3D4u, &writer, raw, out, capacity);
+    case 6: /* prepare-flash.bin */
+      dctp_put_u8(&writer, DCTP_FIRMWARE_FLASH_SCHEMA_VERSION);
+      for (uint8_t value = 0; value < DCTP_FLASH_OPERATION_ID_LEN; value += 1) {
+        dctp_put_u8(&writer, value);
+      }
+      dctp_put_u32(&writer, DCTP_FIRMWARE_TARGET_LCKFB_TMX_MSPM0G3507);
+      dctp_put_u16(&writer, 2);
+      dctp_put_u16(&writer, 3);
+      dctp_put_u16(&writer, 4);
+      dctp_put_u32(&writer, 0x12345u);
+      for (uint8_t index = 0; index < DCTP_IMAGE_SHA256_LEN; index += 1) {
+        dctp_put_u8(&writer, 0xA6u);
+      }
+      return emit_golden_frame(DCTP_MSG_PREPARE_FLASH, DCTP_FLAG_ACK_REQUIRED, 0x1005, 0xA1B2C3D4u, &writer,
+                               raw, out, capacity);
+    case 7: /* prepare-flash-ack.bin */
+      dctp_put_u8(&writer, DCTP_FIRMWARE_FLASH_SCHEMA_VERSION);
+      for (uint8_t value = 0; value < DCTP_FLASH_OPERATION_ID_LEN; value += 1) {
+        dctp_put_u8(&writer, value);
+      }
+      dctp_put_u8(&writer, DCTP_BOOTLOADER_TI_MSPM0_ROM_BSL_UART);
+      dctp_put_u16(&writer, 250);
+      dctp_put_u32(&writer, 9600);
+      return emit_golden_frame(DCTP_MSG_PREPARE_FLASH_ACK, DCTP_FLAG_RESPONSE, 0x1005, 0xA1B2C3D4u, &writer,
+                               raw, out, capacity);
     default:
       return 0;
   }

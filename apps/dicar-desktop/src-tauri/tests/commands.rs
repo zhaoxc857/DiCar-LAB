@@ -207,3 +207,36 @@ fn app_state_dispatches_real_actor_commands_and_forwards_their_results() {
     drop(state);
     server.shutdown().unwrap();
 }
+
+#[test]
+fn firmware_upgrade_lock_blocks_normal_commands_and_releases_on_drop() {
+    let server = SimulatorServer::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+    let state = AppState::spawn(CoreConfig::simulator(server.local_addr())).unwrap();
+    let upgrade = state.begin_firmware_upgrade().unwrap();
+
+    for command in [
+        CoreCommand::Connect,
+        CoreCommand::Disconnect,
+        CoreCommand::WriteParameter {
+            param_id: 1,
+            value: dicar_app_core::ParamValueDto::F32(1.0),
+        },
+    ] {
+        assert_eq!(
+            state.dispatch(command).unwrap_err().code,
+            "firmwareUpgradeActive"
+        );
+    }
+    assert_eq!(
+        state.begin_firmware_upgrade().unwrap_err().code,
+        "firmwareUpgradeActive"
+    );
+
+    drop(upgrade);
+    assert_eq!(
+        state.dispatch(CoreCommand::Connect).unwrap().status,
+        OperationStatus::Succeeded
+    );
+    drop(state);
+    server.shutdown().unwrap();
+}

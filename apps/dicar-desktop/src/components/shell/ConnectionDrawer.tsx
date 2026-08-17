@@ -1,6 +1,6 @@
 import { LinkBreak, PlugsConnected } from "@phosphor-icons/react";
 import { useEffect, useState, type ReactNode } from "react";
-import { useDesktopBridge } from "../../app/providers";
+import { useDesktopBridge, useFirmwareFlashPlatform } from "../../app/providers";
 import { HARDWARE_PROFILES, SUPPORTED_SERIAL_BAUD_RATES } from "../../domain/hardwareProfiles";
 import { connectSerialWithProbe } from "../../domain/serialConnection";
 import { endpointLabel, type Endpoint, type SerialHardwareProfile, type SerialPortDescriptor } from "../../domain/types";
@@ -11,7 +11,11 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Drawer } from "../ui/drawer";
 import { Select } from "../ui/select";
-import { FirmwareFlashEntry } from "./FirmwareFlashEntry";
+import {
+  FirmwareFlashWizard,
+  type FirmwareFlashWizardPhase,
+} from "../firmware/FirmwareFlashWizard";
+import { FirmwareFlashEntry, type FirmwareFlashUiState } from "./FirmwareFlashEntry";
 import { HardwareConnectionGuide } from "./HardwareConnectionGuide";
 import { VehicleSwitcher } from "./VehicleSwitcher";
 
@@ -31,6 +35,7 @@ export function ConnectionDrawer({
   initialSection,
 }: ConnectionDrawerProps) {
   const bridge = useDesktopBridge();
+  const firmwarePlatform = useFirmwareFlashPlatform();
   const snapshot = useConnectionStore((state) => state.snapshot);
   const hydrated = useConnectionStore((state) => state.hydrated);
   const eventError = useConnectionStore((state) => state.eventError);
@@ -47,7 +52,13 @@ export function ConnectionDrawer({
   const [hardwareProfile, setHardwareProfile] = useState<SerialHardwareProfile>(savedProfile);
   const [baudRate, setBaudRate] = useState<number | "auto">(savedBaudRate);
   const [probingRate, setProbingRate] = useState<number | null>(null);
+  const [firmwareOpen, setFirmwareOpen] = useState(false);
+  const [firmwareUiState, setFirmwareUiState] = useState<FirmwareFlashUiState>({ kind: "selecting" });
   const ready = snapshot?.phase === "ready";
+  const firmwareEligible = ready
+    && snapshot.transportIdentity?.endpoint.kind === "serial"
+    && snapshot.transportIdentity.endpoint.baudRate === 9_600
+    && ["hc05BluetoothSpp", "nanoUartWl"].includes(snapshot.transportIdentity.endpoint.hardwareProfile);
 
   useEffect(() => {
     if (open) setSection(initialSection);
@@ -259,10 +270,42 @@ export function ConnectionDrawer({
 
       <FirmwareFlashEntry
         firmwareVersion={snapshot?.firmwareVersion ?? null}
-        state={{ kind: "unavailable" }}
+        onOpenFirmwareFlash={firmwarePlatform.available && firmwareEligible
+          ? () => setFirmwareOpen(true)
+          : undefined}
+        state={!firmwarePlatform.available
+          ? { kind: "unavailable" }
+          : firmwareEligible
+            ? firmwareUiState
+            : { kind: "deviceRequired" }}
+      />
+      <FirmwareFlashWizard
+        currentVersion={snapshot?.firmwareVersion ?? null}
+        onOpenChange={setFirmwareOpen}
+        onPhaseChange={(phase, progressPercent, message) => {
+          setFirmwareUiState(mapFirmwarePhase(phase, progressPercent, message));
+        }}
+        open={firmwareOpen}
       />
     </Drawer>
   );
+}
+
+function mapFirmwarePhase(
+  phase: FirmwareFlashWizardPhase,
+  progressPercent = 0,
+  message = "",
+): FirmwareFlashUiState {
+  switch (phase) {
+    case "selecting": return { kind: "selecting" };
+    case "validating": return { kind: "checking" };
+    case "ready": return { kind: "ready" };
+    case "succeeded": return { kind: "succeeded" };
+    case "recoveryRequired": return { kind: "recoveryRequired", message };
+    case "failed": return { kind: "failed", message };
+    case "preparing": return { kind: "preparing" };
+    default: return { kind: "flashing", progressPercent };
+  }
 }
 
 function SectionButton({

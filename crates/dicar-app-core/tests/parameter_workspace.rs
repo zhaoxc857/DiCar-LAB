@@ -137,9 +137,11 @@ fn access_policy_requires_role_and_active_local_lease() {
             AccessProfile::new(AccessRole::Observer, LeaseState::Active),
             PermissionDecision::Denied("仅观察者不能修改参数"),
             PermissionDecision::Denied("当前身份没有固化权限"),
+            PermissionDecision::Denied("当前身份没有固件烧录权限"),
         ),
         (
             AccessProfile::new(AccessRole::Owner, LeaseState::Inactive),
+            PermissionDecision::Denied("当前设备没有活动控制租约"),
             PermissionDecision::Denied("当前设备没有活动控制租约"),
             PermissionDecision::Denied("当前设备没有活动控制租约"),
         ),
@@ -147,22 +149,26 @@ fn access_policy_requires_role_and_active_local_lease() {
             AccessProfile::new(AccessRole::Tuner, LeaseState::Inactive),
             PermissionDecision::Denied("当前设备没有活动控制租约"),
             PermissionDecision::Denied("当前身份没有固化权限"),
+            PermissionDecision::Denied("当前身份没有固件烧录权限"),
         ),
         (
             AccessProfile::new(AccessRole::Tuner, LeaseState::Active),
             PermissionDecision::Allowed,
             PermissionDecision::Denied("当前身份没有固化权限"),
+            PermissionDecision::Denied("当前身份没有固件烧录权限"),
         ),
         (
             AccessProfile::new(AccessRole::Owner, LeaseState::Active),
             PermissionDecision::Allowed,
             PermissionDecision::Allowed,
+            PermissionDecision::Allowed,
         ),
     ];
 
-    for (profile, write, commit) in cases {
+    for (profile, write, commit, flash) in cases {
         assert_eq!(profile.can_write(), write);
         assert_eq!(profile.can_commit(), commit);
+        assert_eq!(profile.can_flash(), flash);
     }
 }
 

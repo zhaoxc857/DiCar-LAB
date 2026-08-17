@@ -36,6 +36,18 @@
       "description": "TELEMETRY_DATA with f32, i32, u32, and flags32 values",
       "byte_length": 65,
       "sha256": "47b0f2a2993831be1fab8a72951e350307aff1e96288f5d085ffa12d14a63d63"
+    },
+    {
+      "file": "prepare-flash.bin",
+      "description": "PREPARE_FLASH for the Tianmengxing MSPM0G3507 target",
+      "byte_length": 80,
+      "sha256": "0d51caef5e6e86351bd15cd5d5286030c79d4cdcd9b7e2d3c5a4bccb8ff1b214"
+    },
+    {
+      "file": "prepare-flash-ack.bin",
+      "description": "PREPARE_FLASH_ACK for TI MSPM0 ROM BSL UART at 9600 baud",
+      "byte_length": 41,
+      "sha256": "02cfedca662c1df398b0c61f37ed278f1d5615aacf74bc9193aa433c61d82433"
     }
   ]
 }

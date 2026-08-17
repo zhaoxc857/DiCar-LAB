@@ -12,16 +12,18 @@ use std::{
 
 use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender, TrySendError};
 use dctp_protocol::{
-    ErrorCode, MessageType, ParamValue, TelemetryBatch, TelemetrySubscription, WireEncode,
+    BootloaderProtocol, ErrorCode, FirmwareTargetId, MessageType, ParamValue, PrepareFlash,
+    TelemetryBatch, TelemetrySubscription, WireEncode,
 };
 
 use crate::{
     bridge_model::{merge_diagnostics, parameter_snapshots},
-    link_budget, validate_subscription, AccessProfile, ActiveTransport, AppSnapshot, BridgeError,
-    CommitFailureKind, ConnectionLoss, CoreError, CoreEvent, CoreEventPayload, Endpoint,
-    LeaseState, OperationId, OperationResult, OperationStatus, ParamValueDto, ParameterWorkspace,
-    ProtocolSession, SnapshotPhase, SystemClock, SystemNonce, TelemetryEngine,
-    TelemetrySubscriptionSnapshot, Transport, TransportIdentity, UiTelemetryBatch, WriteFailure,
+    link_budget, validate_firmware_flash_start, validate_subscription, AccessProfile,
+    ActiveTransport, AppSnapshot, BridgeError, CommitFailureKind, ConnectionLoss, CoreError,
+    CoreEvent, CoreEventPayload, Endpoint, LeaseState, OperationId, OperationResult,
+    OperationStatus, ParamValueDto, ParameterWorkspace, ProtocolSession, SnapshotPhase,
+    SystemClock, SystemNonce, TelemetryEngine, TelemetrySubscriptionSnapshot, Transport,
+    TransportIdentity, UiTelemetryBatch, WriteFailure,
 };
 
 const COMMAND_CAPACITY: usize = 64;
@@ -121,6 +123,13 @@ pub enum CoreCommand {
         value: ParamValueDto,
     },
     CommitParameters,
+    PrepareFirmwareFlash {
+        flash_operation_id: [u8; 16],
+        target_id: FirmwareTargetId,
+        firmware_version: [u16; 3],
+        image_len: u32,
+        image_sha256: [u8; 32],
+    },
     RevertAllPendingChanges,
     UndoLastConfirmedChange,
     SetTelemetrySubscription {
@@ -604,6 +613,19 @@ impl ActorRuntime {
                 self.write_parameter(param_id, value.into())
             }
             CoreCommand::CommitParameters => self.commit_parameters(),
+            CoreCommand::PrepareFirmwareFlash {
+                flash_operation_id,
+                target_id,
+                firmware_version,
+                image_len,
+                image_sha256,
+            } => self.prepare_firmware_flash(PrepareFlash {
+                operation_id: flash_operation_id,
+                target_id,
+                firmware_version,
+                image_len,
+                image_sha256,
+            }),
             CoreCommand::RevertAllPendingChanges => self.revert_all(),
             CoreCommand::UndoLastConfirmedChange => self.undo_last(),
             CoreCommand::SetTelemetrySubscription {
@@ -735,6 +757,48 @@ impl ActorRuntime {
             .resolve_commit(&plan, result)
             .map_err(|error| error.to_string())?;
         Ok("参数已固化到 Flash")
+    }
+
+    fn prepare_firmware_flash(&mut self, request: PrepareFlash) -> Result<&'static str, String> {
+        let workspace = self.workspace.as_ref().ok_or("设备未连接")?;
+        let device = self.device.as_ref().ok_or("设备未连接")?;
+        let endpoint = &self
+            .transport_identity
+            .as_ref()
+            .ok_or("设备未连接")?
+            .endpoint;
+        validate_firmware_flash_start(
+            self.access,
+            endpoint,
+            device.identity.capabilities,
+            workspace.dirty_count(),
+        )
+        .map_err(|error| error.to_string())?;
+
+        let session = self.session.as_mut().ok_or("设备未连接")?;
+        let ack = session
+            .prepare_firmware_flash(&request)
+            .map_err(|error| error.to_string())?;
+        if ack.bootloader_protocol != BootloaderProtocol::TI_MSPM0_ROM_BSL_UART
+            || ack.initial_baud != 9_600
+        {
+            return Err("设备返回了不支持的 Bootloader 切换参数".into());
+        }
+
+        self.capture_protocol_diagnostics();
+        if let Some(session) = self.session.take() {
+            let mut transport = session.into_transport();
+            let _ = transport.close();
+        }
+        if let Some(workspace) = self.workspace.as_mut() {
+            workspace.mark_disconnected();
+        }
+        self.device = None;
+        self.active_subscription = None;
+        self.paused = true;
+        self.accumulator = None;
+        self.last_disconnect_reason = Some("设备已切换到 TI ROM BSL".into());
+        Ok("设备已确认固件烧录并释放串口")
     }
 
     fn revert_all(&mut self) -> Result<&'static str, String> {

@@ -13,7 +13,7 @@ DiCar Tune 通过 DCTP v1 协议连接车辆，在桌面端集中完成参数读
 | 安装版 | 日常使用，创建标准 Windows 安装 | [DiCar Tune 0.2.0 Setup](release/DiCar-Tune-0.2.0-Windows-x64-Setup.exe) |
 | 便携版 | 免安装测试，直接运行可执行文件 | [DiCar Tune 0.2.0 Portable](release/DiCar-Tune-0.2.0-Windows-x64-Portable.exe) |
 
-两个版本都包含内置模拟器和精准控制台界面，不需要额外启动后台服务。发布文件尚未进行商业代码签名，Windows 首次运行时可能显示安全提示。完整校验值见 [SHA256SUMS.txt](release/SHA256SUMS.txt)。
+两个版本都包含内置模拟器、精准控制台和天猛星 MSPM0G3507 无线烧录页面，不需要额外启动后台服务。发布文件尚未进行商业代码签名，Windows 首次运行时可能显示安全提示。完整校验值见 [SHA256SUMS.txt](release/SHA256SUMS.txt)。
 
 ## 5 分钟体验
 
@@ -43,6 +43,25 @@ DiCar Tune 通过 DCTP v1 协议连接车辆，在桌面端集中完成参数读
 - 独立波形记录页面：从 Bridge 原始批次记录最长 5 分钟，最多 20 条 / 256 MiB；支持自动封存、最旧记录清理、schema v1 JSON 导入导出、宽表 CSV 和独立时间轴回放。
 - 内置 DCTP 模拟器、协议重试、CRC、会话和参数版本冲突处理。
 - 车端 DCTP v1 参考库（纯 C99、零动态分配），由 Rust 权威实现和黄金向量逐字节交叉验证。
+- 天猛星 MSPM0G3507 无线固件升级软件链：签名 `.dicarfw`、每设备 BSL 凭据、
+  HC-05/nanoUART-wl 9600 8N1、TI ROM BSL、主机恢复包和不可取消关键阶段。
+  当前发布包已通过软件门禁和 Windows 启动烟测，实板链路与中断恢复仍待验收。
+
+## 无线固件升级首版
+
+HC-05 和 nanoUART-wl 在烧录流程中只是透明串口，真正执行擦除、写入、CRC 校验和启动的是 MSPM0G3507 ROM BSL。首版流程固定为：
+
+```text
+DCTP 就绪与安全检查
+  → PREPARE_FLASH 安全停机并释放串口
+  → TI ROM BSL 9600 8N1
+  → 解锁、擦除、分块写入、CRC 校验
+  → 启动应用并按设备 ID/版本重连核对
+```
+
+入口位于顶部“设备连接”抽屉的“设备固件”区域。它只在 Windows 桌面版、真实 HC-05/nanoUART-wl 串口、9600 baud 且设备会话就绪时开放；核心层还会拒绝无 Owner 控制权、存在待固化参数、设备未声明能力、缺少设备凭据/可信公钥/恢复包或目标不匹配的请求。擦除开始后的失败不会假装成功，升级锁会保持到用户重试或刷回已验证恢复包。
+
+目前只实现天猛星 MSPM0G3507。MSPM0G3519 与 STM32F1/F4 仍是后续适配目标；实体 HC-05/nanoUART-wl、NONMAIN 配置、掉电中断和回滚没有完成硬件验收。详细准备、签名、配置和人工恢复步骤见[无线固件升级指南](docs/wireless-firmware-flashing.md)。
 
 ## 车型配置
 
@@ -64,12 +83,14 @@ DiCar Tune 通过 DCTP v1 协议连接车辆，在桌面端集中完成参数读
 ## 文档
 
 - [用户手册：安装、接线、调参、波形与排障](docs/user-guide.md)
+- [MSPM0G3507 无线固件升级：条件、操作、恢复与配置](docs/wireless-firmware-flashing.md)
 - [开发文档：架构、环境、测试、协议与打包](docs/development.md)
 - [DCTP v1 协议设计](docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md)
 
 ## 当前限制
 
-- 设备抽屉已预留禁用的无线烧录入口，但没有后端绑定，也不能选择或传输固件；无线固件烧录是下一项新增产品功能。
+- 无线固件升级的软件实现首版只支持天猛星 MSPM0G3507；`release/` 0.2.0
+  已包含烧录页面与桌面后台，但 ARM 交叉编译、HC-05/nanoUART-wl 和天猛星实板流程尚未验收。
 - 纯 Web 客户端不能建立真实 DCTP 设备会话，且不在当前开发范围内。
 - AI 调参仅 Windows 桌面版可用；浏览器、Web Serial 和非 Tauri Mock 不接受或保存 API Key。
 - 权限和控制权是本地演示策略，不是云端安全或分布式租约系统。
@@ -89,6 +110,33 @@ pnpm dev
 
 浏览器打开 `http://127.0.0.1:5173/`。完整构建、测试、模拟器和 Windows 打包命令见[开发文档](docs/development.md)。
 
+常用质量门禁：
+
+```powershell
+pnpm lint
+pnpm typecheck
+pnpm test -- --run
+pnpm build
+pnpm test:e2e
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features --offline -- -D warnings
+cargo test --workspace --all-targets --offline
+```
+
+## 仓库结构
+
+| 路径 | 内容 |
+| --- | --- |
+| `apps/dicar-desktop/` | React UI、Tauri Windows 后端与桌面集成测试 |
+| `crates/dctp-protocol/` | DCTP v1 权威线级类型、编解码与校验 |
+| `crates/dicar-app-core/` | 会话、权限、参数真值、遥测和串口 actor |
+| `crates/dicar-firmware-flash/` | `.dicarfw`、TI ROM BSL、设备配置与恢复工具 |
+| `firmware/dctp-device/` | 可移植的 C99 DCTP 设备端库 |
+| `firmware/targets/` | 具体 MCU/开发板安全切换适配层 |
+| `test-vectors/dctp-v1/` | Rust 生成、C 逐字节复现的 8 个黄金向量 |
+| `docs/` | 用户手册、开发文档、协议规格和烧录指南 |
+| `release/` | Windows 0.2.0 安装版、便携版及 SHA-256 清单 |
+
 ## 项目状态
 
-0.2.0 在首个硬件兼容版本上增加安全桌面 AI 通道、本机原始波形记录/回放和精准控制台，并兼容恢复旧首页的四功能入口。`release/` 内安装版和便携版均包含当前界面；项目仍处于早期迭代阶段，真实车辆接入前仍应先在断电、安全架起或低功率条件下验证参数范围与控制方向。
+0.2.0 在首个硬件兼容版本上增加安全桌面 AI 通道、本机原始波形记录/回放、精准控制台和 MSPM0G3507 无线烧录软件链，并兼容恢复旧首页的四功能入口。`release/` 内安装版和便携版均包含当前界面与桌面后台；项目仍处于早期迭代阶段，真实车辆接入前仍应先在断电、安全架起或低功率条件下验证参数范围、控制方向和恢复路径。

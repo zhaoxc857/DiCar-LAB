@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Condvar, Mutex,
     },
     thread::{self, JoinHandle},
@@ -125,7 +125,8 @@ pub struct AppState {
     configured_endpoint: Endpoint,
     sequencer: Arc<FrontendEventSequencer>,
     completions: Arc<CompletionStore>,
-    command_gate: Mutex<()>,
+    command_gate: Arc<Mutex<()>>,
+    firmware_upgrade_active: Arc<AtomicBool>,
     next_bridge_operation_id: AtomicU64,
     close_coordinator: Mutex<WindowCloseCoordinator>,
     forwarder: Mutex<Option<JoinHandle<()>>>,
@@ -160,7 +161,8 @@ impl AppState {
             configured_endpoint,
             sequencer,
             completions,
-            command_gate: Mutex::new(()),
+            command_gate: Arc::new(Mutex::new(())),
+            firmware_upgrade_active: Arc::new(AtomicBool::new(false)),
             next_bridge_operation_id: AtomicU64::new(1_u64 << 63),
             close_coordinator: Mutex::new(WindowCloseCoordinator::default()),
             forwarder: Mutex::new(Some(forwarder)),
@@ -181,6 +183,44 @@ impl AppState {
 
     pub fn dispatch(&self, command: CoreCommand) -> Result<OperationResult, BridgeErrorDto> {
         let _command_guard = lock(&self.command_gate);
+        if self.firmware_upgrade_active.load(Ordering::Acquire) {
+            return Err(firmware_upgrade_active_error());
+        }
+        self.dispatch_while_gated(command)
+    }
+
+    pub fn begin_firmware_upgrade(&self) -> Result<FirmwareUpgradeGuard, BridgeErrorDto> {
+        let _command_guard = lock(&self.command_gate);
+        if self.firmware_upgrade_active.swap(true, Ordering::AcqRel) {
+            return Err(firmware_upgrade_active_error());
+        }
+        Ok(FirmwareUpgradeGuard {
+            active: Arc::clone(&self.firmware_upgrade_active),
+            command_gate: Arc::clone(&self.command_gate),
+        })
+    }
+
+    pub(crate) fn dispatch_firmware(
+        &self,
+        guard: &FirmwareUpgradeGuard,
+        command: CoreCommand,
+    ) -> Result<OperationResult, BridgeErrorDto> {
+        if !Arc::ptr_eq(&self.firmware_upgrade_active, &guard.active)
+            || !guard.active.load(Ordering::Acquire)
+        {
+            return Err(BridgeErrorDto::new(
+                "invalidFirmwareUpgradeLease",
+                "固件升级独占凭证无效",
+            ));
+        }
+        let _command_guard = lock(&self.command_gate);
+        self.dispatch_while_gated(command)
+    }
+
+    fn dispatch_while_gated(
+        &self,
+        command: CoreCommand,
+    ) -> Result<OperationResult, BridgeErrorDto> {
         let operation_id = {
             let actor = lock(&self.actor);
             let actor = actor
@@ -221,6 +261,9 @@ impl AppState {
     }
 
     pub fn request_window_close(&self) -> Result<CloseRequestOutcome, BridgeErrorDto> {
+        if self.firmware_upgrade_active.load(Ordering::Acquire) {
+            return Err(firmware_upgrade_active_error());
+        }
         let (outcome, created) = lock(&self.close_coordinator).request(&self.snapshot())?;
         if created {
             if let CloseRequestOutcome::Prevented {
@@ -289,6 +332,24 @@ impl AppState {
     }
 }
 
+pub struct FirmwareUpgradeGuard {
+    active: Arc<AtomicBool>,
+    command_gate: Arc<Mutex<()>>,
+}
+
+impl std::fmt::Debug for FirmwareUpgradeGuard {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("FirmwareUpgradeGuard(active)")
+    }
+}
+
+impl Drop for FirmwareUpgradeGuard {
+    fn drop(&mut self) {
+        let _command_guard = lock(&self.command_gate);
+        self.active.store(false, Ordering::Release);
+    }
+}
+
 impl Drop for AppState {
     fn drop(&mut self) {
         if let Some(actor) = lock(&self.actor).take() {
@@ -314,6 +375,13 @@ fn require_success(result: OperationResult) -> Result<OperationResult, BridgeErr
 
 fn actor_error(error: ActorError) -> BridgeErrorDto {
     BridgeErrorDto::new("actorUnavailable", format!("核心服务不可用：{error}"))
+}
+
+fn firmware_upgrade_active_error() -> BridgeErrorDto {
+    BridgeErrorDto::new(
+        "firmwareUpgradeActive",
+        "固件升级正在独占设备，当前操作不可用",
+    )
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

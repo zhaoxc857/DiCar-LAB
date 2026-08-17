@@ -5,13 +5,15 @@ use std::path::PathBuf;
 
 use dctp_device_c::build_golden;
 
-const VECTOR_FILES: [&str; 6] = [
+const VECTOR_FILES: [&str; 8] = [
     "hello.bin",
     "hello-ack.bin",
     "param-write.bin",
     "param-value.bin",
     "param-commit-ack.bin",
     "telemetry-mixed.bin",
+    "prepare-flash.bin",
+    "prepare-flash-ack.bin",
 ];
 
 fn vector_path(file: &str) -> PathBuf {

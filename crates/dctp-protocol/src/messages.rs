@@ -6,6 +6,7 @@ use crate::{
 
 pub const MAX_ERROR_CONTEXT_LEN: usize = 64;
 pub const MAX_MANIFEST_LEN: usize = 64 * 1024;
+const FIRMWARE_FLASH_SCHEMA_VERSION: u8 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CapabilityFlags(u32);
@@ -24,6 +25,10 @@ impl CapabilityFlags {
     pub const fn bits(self) -> u32 {
         self.0
     }
+
+    pub const fn contains(self, capability: Self) -> bool {
+        self.0 & capability.0 == capability.0
+    }
 }
 
 impl BitOr for CapabilityFlags {
@@ -31,6 +36,36 @@ impl BitOr for CapabilityFlags {
 
     fn bitor(self, rhs: Self) -> Self::Output {
         Self(self.0 | rhs.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FirmwareTargetId(u32);
+
+impl FirmwareTargetId {
+    pub const LCKFB_TMX_MSPM0G3507: Self = Self(1);
+
+    pub const fn from_bits(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BootloaderProtocol(u8);
+
+impl BootloaderProtocol {
+    pub const TI_MSPM0_ROM_BSL_UART: Self = Self(1);
+
+    pub const fn from_bits(bits: u8) -> Self {
+        Self(bits)
+    }
+
+    pub const fn bits(self) -> u8 {
+        self.0
     }
 }
 
@@ -190,6 +225,101 @@ impl WireDecode for HelloAck {
         };
         reader.finish()?;
         Ok(value)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrepareFlash {
+    pub operation_id: [u8; 16],
+    pub target_id: FirmwareTargetId,
+    pub firmware_version: [u16; 3],
+    pub image_len: u32,
+    pub image_sha256: [u8; 32],
+}
+
+impl WireEncode for PrepareFlash {
+    fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
+        let mut writer = WireWriter::new();
+        writer.put_u8(FIRMWARE_FLASH_SCHEMA_VERSION);
+        writer.put_bytes(&self.operation_id);
+        writer.put_u32(self.target_id.bits());
+        for component in self.firmware_version {
+            writer.put_u16(component);
+        }
+        writer.put_u32(self.image_len);
+        writer.put_bytes(&self.image_sha256);
+        Ok(writer.into_inner())
+    }
+}
+
+impl WireDecode for PrepareFlash {
+    fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        let mut reader = WireReader::new(bytes);
+        if reader.read_u8()? != FIRMWARE_FLASH_SCHEMA_VERSION {
+            return Err(ProtocolError::UnsupportedVersion);
+        }
+        let operation_id = reader
+            .read_exact(16)?
+            .try_into()
+            .map_err(|_| ProtocolError::Truncated)?;
+        let target_id = FirmwareTargetId::from_bits(reader.read_u32()?);
+        let firmware_version = [reader.read_u16()?, reader.read_u16()?, reader.read_u16()?];
+        let image_len = reader.read_u32()?;
+        let image_sha256 = reader
+            .read_exact(32)?
+            .try_into()
+            .map_err(|_| ProtocolError::Truncated)?;
+        reader.finish()?;
+        Ok(Self {
+            operation_id,
+            target_id,
+            firmware_version,
+            image_len,
+            image_sha256,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrepareFlashAck {
+    pub operation_id: [u8; 16],
+    pub bootloader_protocol: BootloaderProtocol,
+    pub entry_delay_ms: u16,
+    pub initial_baud: u32,
+}
+
+impl WireEncode for PrepareFlashAck {
+    fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
+        let mut writer = WireWriter::new();
+        writer.put_u8(FIRMWARE_FLASH_SCHEMA_VERSION);
+        writer.put_bytes(&self.operation_id);
+        writer.put_u8(self.bootloader_protocol.bits());
+        writer.put_u16(self.entry_delay_ms);
+        writer.put_u32(self.initial_baud);
+        Ok(writer.into_inner())
+    }
+}
+
+impl WireDecode for PrepareFlashAck {
+    fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        let mut reader = WireReader::new(bytes);
+        if reader.read_u8()? != FIRMWARE_FLASH_SCHEMA_VERSION {
+            return Err(ProtocolError::UnsupportedVersion);
+        }
+        let operation_id = reader
+            .read_exact(16)?
+            .try_into()
+            .map_err(|_| ProtocolError::Truncated)?;
+        let bootloader_protocol = BootloaderProtocol::from_bits(reader.read_u8()?);
+        let entry_delay_ms = reader.read_u16()?;
+        let initial_baud = reader.read_u32()?;
+        reader.finish()?;
+        Ok(Self {
+            operation_id,
+            bootloader_protocol,
+            entry_delay_ms,
+            initial_baud,
+        })
     }
 }
 

@@ -23,8 +23,9 @@ pub use manifest::{
     DeviceManifest, MANIFEST_SCHEMA_VERSION, MAX_MANIFEST_PARAMETERS, MAX_MANIFEST_TELEMETRY,
 };
 pub use messages::{
-    CapabilityFlags, ErrorCode, ErrorPayload, Heartbeat, Hello, HelloAck, ManifestAssembler,
-    ManifestChunk, ManifestDone, MAX_ERROR_CONTEXT_LEN, MAX_MANIFEST_LEN,
+    BootloaderProtocol, CapabilityFlags, ErrorCode, ErrorPayload, FirmwareTargetId, Heartbeat,
+    Hello, HelloAck, ManifestAssembler, ManifestChunk, ManifestDone, PrepareFlash, PrepareFlashAck,
+    MAX_ERROR_CONTEXT_LEN, MAX_MANIFEST_LEN,
 };
 pub use parameter::{
     canonical_parameter_crc32, EnumOption, ParamCommit, ParamCommitAck, ParamCommitEntry,

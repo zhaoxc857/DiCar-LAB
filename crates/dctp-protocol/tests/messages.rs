@@ -1,7 +1,7 @@
 use dctp_protocol::{
-    CapabilityFlags, ErrorCode, ErrorPayload, Heartbeat, Hello, HelloAck, ManifestAssembler,
-    ManifestChunk, ManifestDone, MessageType, ProtocolError, WireDecode, WireEncode, WireReader,
-    WireWriter,
+    BootloaderProtocol, CapabilityFlags, ErrorCode, ErrorPayload, FirmwareTargetId, Heartbeat,
+    Hello, HelloAck, ManifestAssembler, ManifestChunk, ManifestDone, MessageType, PrepareFlash,
+    PrepareFlashAck, ProtocolError, WireDecode, WireEncode, WireReader, WireWriter,
 };
 
 #[test]
@@ -65,6 +65,15 @@ fn hello_ack_and_heartbeat_round_trip() {
         Heartbeat::decode(&heartbeat.encode().unwrap()).unwrap(),
         heartbeat
     );
+}
+
+#[test]
+fn capability_flags_report_individual_supported_features() {
+    let capabilities = CapabilityFlags::PARAMETERS | CapabilityFlags::PREPARE_FLASH;
+
+    assert!(capabilities.contains(CapabilityFlags::PARAMETERS));
+    assert!(capabilities.contains(CapabilityFlags::PREPARE_FLASH));
+    assert!(!capabilities.contains(CapabilityFlags::TELEMETRY));
 }
 
 #[test]
@@ -205,4 +214,70 @@ fn wire_reader_finish_rejects_unread_data() {
     let mut reader = WireReader::new(&[1, 2]);
     assert_eq!(reader.read_u8().unwrap(), 1);
     assert!(matches!(reader.finish(), Err(ProtocolError::InvalidLength)));
+}
+
+#[test]
+fn prepare_flash_payload_has_the_stable_v1_layout_and_round_trips() {
+    let request = PrepareFlash {
+        operation_id: [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ],
+        target_id: FirmwareTargetId::LCKFB_TMX_MSPM0G3507,
+        firmware_version: [0, 3, 0],
+        image_len: 0x0001_2000,
+        image_sha256: [0xA5; 32],
+    };
+
+    let bytes = request.encode().unwrap();
+
+    let mut expected = vec![
+        0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+        0x0E, 0x0F, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x20, 0x01,
+        0x00,
+    ];
+    expected.extend_from_slice(&[0xA5; 32]);
+    assert_eq!(bytes, expected);
+    assert_eq!(PrepareFlash::decode(&bytes).unwrap(), request);
+}
+
+#[test]
+fn prepare_flash_ack_has_the_stable_v1_layout_and_round_trips() {
+    let ack = PrepareFlashAck {
+        operation_id: [0x11; 16],
+        bootloader_protocol: BootloaderProtocol::TI_MSPM0_ROM_BSL_UART,
+        entry_delay_ms: 250,
+        initial_baud: 9_600,
+    };
+
+    let bytes = ack.encode().unwrap();
+
+    let mut expected = vec![0x01];
+    expected.extend_from_slice(&[0x11; 16]);
+    expected.extend_from_slice(&[0x01, 0xFA, 0x00, 0x80, 0x25, 0x00, 0x00]);
+    assert_eq!(bytes, expected);
+    assert_eq!(PrepareFlashAck::decode(&bytes).unwrap(), ack);
+}
+
+#[test]
+fn prepare_flash_payloads_reject_wrong_schema_truncation_and_trailing_bytes() {
+    let mut request = vec![0; 63];
+    request[0] = 2;
+    assert!(matches!(
+        PrepareFlash::decode(&request),
+        Err(ProtocolError::UnsupportedVersion)
+    ));
+
+    request[0] = 1;
+    assert!(matches!(
+        PrepareFlash::decode(&request[..62]),
+        Err(ProtocolError::Truncated)
+    ));
+
+    let mut ack = vec![0; 25];
+    ack[0] = 1;
+    assert!(matches!(
+        PrepareFlashAck::decode(&ack),
+        Err(ProtocolError::InvalidLength)
+    ));
 }

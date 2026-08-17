@@ -2,7 +2,7 @@
 
 本文说明 DiCar Tune 0.2.0 的代码边界、开发环境、质量门禁和 Windows 打包流程。使用说明见[用户手册](user-guide.md)。
 
-当前 `release/` 内 0.2.0 安装版与便携版已于 2026-08-15 按第 7、9 节完整流程重新构建，包含旧首页四入口与精准控制台工作台的兼容合并；版本号与 Rust/Tauri 后端逻辑未改变。
+当前 `release/` 内 0.2.0 安装版与便携版已于 2026-08-17 按第 7、9 节完整流程重新构建，包含兼容首页、精准控制台以及天猛星 MSPM0G3507 无线烧录页面和 Tauri 固件服务；版本号保持 0.2.0。
 
 ## 1. 架构
 
@@ -10,11 +10,15 @@
 flowchart LR
     UI["React 工作区"] --> Bridge["DesktopBridge 接口"]
     UI --> AiPlatform["AiPlatform"]
+    UI --> FirmwarePlatform["FirmwareFlashPlatform"]
     UI --> Recorder["RecordingController"]
     Bridge --> Tauri["Tauri Commands / Events"]
     AiPlatform --> AiService["Tauri AI Service"]
     AiService --> Credential["Windows Credential Manager"]
     AiService --> DeepSeek["固定 DeepSeek HTTPS"]
+    FirmwarePlatform --> FirmwareService["Tauri Firmware Service"]
+    FirmwareService --> Credential
+    FirmwareService --> RomBsl["TI ROM BSL / COM"]
     Recorder --> IndexedDB["原始批次 IndexedDB"]
     Tauri --> Actor["dicar-app-core AppActor"]
     Actor --> Session["DCTP ProtocolSession"]
@@ -29,6 +33,8 @@ flowchart LR
 - 车辆 YAML 只把 Manifest 的精确 `machine_name` 解析成任务；resolver 输出稳定的 `paramId`/`channelId`，不修改设备 DTO。
 - Tauri 层负责类型化命令、事件转发、串口发现和内置模拟器生命周期。
 - 独立 `AiPlatform` 把 React 与 Tauri AI command 隔离；Rust AI service 独占凭据、HTTP、限制和取消，Key 不进入前端状态。
+- 独立 `FirmwareFlashPlatform` 把 React 向导与 Tauri 固件服务隔离；服务独占升级
+  锁、签名信任、每设备 BSL 凭据、ROM BSL 串口和恢复包，普通 Bridge 不传输固件。
 - `RecordingController` 在唯一 Bridge 事件入口先复制原始遥测批次，再交给实时绘图 store；IndexedDB 和回放不修改 DCTP wire 或设备状态。
 - `dicar-app-core` 负责单线程 AppActor、会话、权限策略、参数工作区、链路预算和遥测缓冲。
 - `dctp-protocol` 只负责 DCTP v1 编解码和 payload 模型，不执行 IO。
@@ -48,8 +54,10 @@ crates/
   dctp-sim/              确定性模拟设备和 TCP server
   dctp-device-c/         车端 C 参考库的 Rust 交叉验证 harness
   dicar-app-core/        会话、AppActor、参数与遥测核心
+  dicar-firmware-flash/  签名包、TI ROM BSL、凭据、恢复与离线工具
 firmware/
   dctp-device/           车端 DCTP v1 参考库（C99）与移植指南
+  targets/               具体 MCU/开发板的安全切换适配
 docs/
   user-guide.md          使用者手册
   development.md         本文
@@ -133,7 +141,8 @@ Web 预览不启用 AI，也不接受或保存 DeepSeek Key；只有 Tauri Windo
 - `TelemetryStrip` 只读取已解析控制环、RAM 参数、绘图环形缓冲和 `AppSnapshot`；缺失字段显示“—”，不推算实测 RX 速率或健康评分。
 - `RecordingLibrary` 复用现有 `RecordingController`，由 `/records` 独立页面承载；回放仍使用独立只读缓冲。
 - 参数方案没有第二套页面或 store：`/live?panel=snapshots` 打开工作台现有 `SnapshotManagerDialog`，关闭时只移除 `panel` 查询参数并保留其他参数；旧 `/parameter-sets` 使用 replace 重定向到该地址。
-- `FirmwareFlashEntry` 当前只接受类型化前端状态并固定传入 `unavailable`，没有 Tauri command、Bridge 方法或 Rust 后端绑定。不得把禁用入口描述为已支持无线烧录。
+- `FirmwareFlashEntry` 只在已就绪的 HC-05/nanoUART-wl 9600 baud 真实串口上启用，
+  打开独立 `FirmwareFlashWizard`；非 Tauri 环境使用显式 unavailable 平台。
 
 ## 5. 运行模拟器
 
@@ -204,6 +213,30 @@ React 只消费 `AiPlatform`，不直接 import
 Tauri invoke。Rust 测试用内存凭据替身和本地 HTTP server，自动化不访问真实
 DeepSeek。
 
+### MSPM0G3507 无线固件升级
+
+`apps/dicar-desktop/src-tauri/src/firmware_service.rs` 在升级前获取 AppState 的
+RAII 独占锁，验证真实串口、Owner/控制权、零 dirty、设备能力、目标/版本、签名
+公钥、设备 BSL 密码和恢复包，再通过 DCTP `PREPARE_FLASH` 请求车端安全停机。
+ACK 后 Core 释放串口且不发送普通 `SESSION_CLOSE`，固件服务等待切换并以 9600
+8N1 执行 TI ROM BSL 的连接、解锁、擦除、分块写入、CRC 校验和启动。重连必须
+同时匹配原设备 ID 与目标固件版本。
+
+可复用边界位于 `crates/dicar-firmware-flash`：
+
+- `.dicarfw` v1 使用严格有界 Manifest、镜像 SHA-256 与 Ed25519 签名；
+- BSL 密码按设备存入 Windows Credential Manager，不返回前端；
+- 恢复包按设备原子替换，擦除后的错误保留升级锁，只允许重试或回滚；
+- `dicar-firmware-tool` 是离线签名/配置工具，密码只走 stdin，输出文件拒绝覆盖。
+
+车端通用 DCTP 库仍不含 TI 寄存器代码。天猛星适配在
+`firmware/targets/lckfb-tmx-mspm0g3507/`：先 `safe_stop`，再发送 ACK，等待
+`uart_tx_complete`，最后调用 DriverLib 的 BOOTLOADER_ENTRY 复位入口。MSP
+工程需选择 `__MSPM0G3507__` 并加入目标目录两个 `.c`。本机没有 TI Arm Clang
+或 Arm GCC；真实 SDK 交叉编译、NONMAIN 和实板流程仍是发布门禁。
+
+完整操作和恢复说明见[无线固件升级指南](wireless-firmware-flashing.md)。
+
 ### 原始波形记录与回放
 
 `useBridgeSubscription` 是唯一事件扇出。它先调用 `RecordingController.acceptEvent`
@@ -234,7 +267,10 @@ pnpm build
 pnpm test:e2e
 ```
 
-当前前端基线为 42 个 Vitest 文件 / 187 个测试、11 个 Playwright 场景。覆盖范围包括 bridge 合同、车辆 YAML 安全边界、Manifest 兼容解析、设置 v4、双模式零设备命令、设备抽屉、四卡首页与旧路由兼容、遥测指标条、参数编辑、参数方案（保存/差异应用/固化记录）、安全 AI command/取消/凭据迁移、原始记录分块/限额/原子导入、独立记录页与回放、编码器、波形、权限、诊断语义分组、窄屏导航和 axe 可访问性。Playwright 使用 Mock 验证首页响应式布局、参数方案深链接、录制、订阅变化封存、回放和 JSON/CSV 下载，不调用真实 DeepSeek。
+当前前端基线为 44 个 Vitest 文件 / 194 个测试、11 个 Playwright 场景。除原有
+Bridge、调参、记录、AI、波形和可访问性覆盖外，Vitest 还验证固件平台命令、
+入口资格、降级确认、关键阶段不可取消和恢复操作。Playwright 仍使用 Mock，
+不访问真实串口、DeepSeek 或 Bootloader。
 
 ### Rust workspace
 
@@ -265,7 +301,8 @@ cargo +stable-x86_64-pc-windows-msvc test --workspace --all-targets
 
 ## 8. DCTP 黄金向量
 
-验证已提交的六个 DCTP v1 二进制向量：
+无线烧录协议增加 `PREPARE_FLASH` 请求/ACK 两个向量，生成器与交叉测试现在要求
+共八个 DCTP v1 二进制向量：
 
 ```powershell
 cargo run -p dctp-sim --bin generate_vectors -- --check
@@ -338,7 +375,8 @@ target/release/bundle/nsis/DiCar Tune_<version>_x64-setup.exe
 - UI 限制用于指导使用者，核心限制才是不可绕过的安全边界。
 - 不根据商品宣传直接承诺距离、速率或抗干扰性能；实体链路必须单独验证。
 - HC-05 使用 Windows Bluetooth Classic SPP 传出 COM，不把它描述为 Web Bluetooth。
-- 当前无线烧录只有 `FirmwareFlashEntry` 禁用入口。开始实现前必须先写安全边界、失败恢复、固件兼容和断电恢复规格，再设计后端命令；不得复用普通参数固化文案冒充固件升级。
+- 无线烧录仅允许独立 Firmware service 在升级锁内执行；不得通过普通
+  `DesktopBridge` 发送镜像，也不得把参数固化文案复用于固件升级。
 
 ## 11. 贡献建议
 
@@ -348,7 +386,8 @@ target/release/bundle/nsis/DiCar Tune_<version>_x64-setup.exe
 - 保持 UI 只消费 bridge/store，不在组件中直接调用 Tauri API。
 - 不提交 `target/`、临时测试目录或已被替代的发布二进制。
 - 每个里程碑结束时检查旧发布物、临时输出、失效文档和被替代资产；先解析并核实精确路径，优先移入回收站或采用其他可恢复清理方式，不使用宽泛递归删除。
-- 下一项新增产品能力是无线固件烧录后端与硬件流程；实体 nanoUART-wl/HC-05 验证排在其后，并必须等待用户确认硬件就绪。其他工作只完善现有功能与 UI。
+- 无线固件烧录软件首版完成后，下一门禁是天猛星与 nanoUART-wl/HC-05 实体
+  验证；在硬件验收前不得描述为可发布支持。MSPM0G3519 与 STM32 适配仍为后续。
 - 提交前运行与变更范围匹配的聚焦测试，并在最终阶段运行完整门禁。
 
 返回[项目 README](../README.md)或查看[用户手册](user-guide.md)。

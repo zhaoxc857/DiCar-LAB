@@ -44,6 +44,8 @@ extern "C" {
 #define DCTP_HEADER_LEN 13u
 #define DCTP_RAW_FRAME_MAX (DCTP_HEADER_LEN + DCTP_MAX_PAYLOAD + 2u)
 #define DCTP_DEVICE_ID_LEN 16u
+#define DCTP_FLASH_OPERATION_ID_LEN 16u
+#define DCTP_IMAGE_SHA256_LEN 32u
 #define DCTP_TELEMETRY_MAX_SUBSCRIBED 8u
 #define DCTP_TELEMETRY_MAX_SAMPLES 16u
 #define DCTP_CACHE_PAYLOAD_MAX 72u
@@ -140,6 +142,26 @@ enum {
   DCTP_PERSIST_VERIFY_FAILED = 2,  /* 读回校验失败 -> VERIFY_FAILED */
 };
 
+enum {
+  DCTP_FIRMWARE_TARGET_LCKFB_TMX_MSPM0G3507 = 1u,
+  DCTP_BOOTLOADER_TI_MSPM0_ROM_BSL_UART = 1u,
+};
+
+typedef struct {
+  uint8_t operation_id[DCTP_FLASH_OPERATION_ID_LEN];
+  uint32_t target_id;
+  uint16_t firmware_version[3];
+  uint32_t image_len;
+  uint8_t image_sha256[DCTP_IMAGE_SHA256_LEN];
+} dctp_prepare_flash_request_t;
+
+typedef struct {
+  uint8_t operation_id[DCTP_FLASH_OPERATION_ID_LEN];
+  uint8_t bootloader_protocol;
+  uint16_t entry_delay_ms;
+  uint32_t initial_baud;
+} dctp_flash_transition_t;
+
 typedef struct {
   const dctp_param_descriptor_t *params;
   uint16_t param_count;
@@ -170,6 +192,14 @@ typedef struct {
    * DCTP_PERSIST_OK 后库才更新 Flash 影子值并递增 Generation。
    */
   int (*persist)(void *user, const uint8_t *blob, uint32_t len);
+
+  /*
+   * 可选（NULL 表示不支持固件烧录准备）。校验请求并填充 Bootloader
+   * 切换参数；返回 false 时 PREPARE_FLASH 返回 NOT_READY。回调只做准备，
+   * 不得在 ACK 发出前复位或进入 BSL。
+   */
+  bool (*prepare_flash)(void *user, const dctp_prepare_flash_request_t *request,
+                        dctp_flash_transition_t *transition);
 
   void *user;
 } dctp_device_config_t;
@@ -246,6 +276,10 @@ typedef struct {
   uint32_t dropped_telemetry_frames;
   uint32_t dropped_log_messages;
 
+  /* ACK 已交给发送路径后置位，由主循环一次性取走并执行平台 BSL 切换。 */
+  bool flash_transition_pending;
+  dctp_flash_transition_t flash_transition;
+
   /* COBS 流解码器（渐进解码，收满一帧立即处理） */
   uint8_t rx_frame[DCTP_RAW_FRAME_MAX];
   uint16_t rx_len;
@@ -292,6 +326,13 @@ bool dctp_device_log(dctp_device_t *device, uint8_t severity, uint16_t module_id
 /* 固件内部读写参数。set 会校验类型与约束并递增 value_revision。 */
 bool dctp_device_get_value(const dctp_device_t *device, uint32_t param_id, dctp_value_t *out);
 bool dctp_device_set_value(dctp_device_t *device, uint32_t param_id, dctp_value_t value);
+
+/*
+ * 一次性取得已经 ACK 的 Bootloader 切换请求。平台应等待 UART TX 完成，
+ * 再按 entry_delay_ms/initial_baud 约定进入 ROM BSL。无待处理请求返回 false。
+ */
+bool dctp_device_take_flash_transition(dctp_device_t *device,
+                                       dctp_flash_transition_t *transition);
 
 /*
  * 启动时从 A/B 双槽恢复固化参数：传入两个槽的原始字节（无效槽可传

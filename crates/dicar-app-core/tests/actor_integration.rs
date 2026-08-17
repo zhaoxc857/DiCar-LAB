@@ -1,6 +1,7 @@
 use std::net::{Shutdown, TcpListener};
 use std::time::{Duration, Instant};
 
+use dctp_protocol::FirmwareTargetId;
 use dctp_sim::SimulatorServer;
 use dicar_app_core::{
     AppActorHandle, CoreCommand, CoreConfig, CoreEventPayload, Endpoint, OperationStatus,
@@ -49,6 +50,42 @@ fn failed_protocol_handshake_does_not_leave_a_connected_transport_identity() {
 
     actor.shutdown().unwrap();
     peer.join().unwrap();
+}
+
+#[test]
+fn firmware_flash_command_rejects_simulator_before_protocol_handoff() {
+    let server = SimulatorServer::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+    let actor = AppActorHandle::spawn(CoreConfig::simulator(server.local_addr())).unwrap();
+    let events = actor.subscribe().unwrap();
+    actor.send(CoreCommand::Connect).unwrap();
+    wait_until(Duration::from_secs(2), || {
+        actor.snapshot().phase == SnapshotPhase::Ready
+    });
+
+    let operation_id = actor
+        .send(CoreCommand::PrepareFirmwareFlash {
+            flash_operation_id: [0x31; 16],
+            target_id: FirmwareTargetId::LCKFB_TMX_MSPM0G3507,
+            firmware_version: [2, 0, 0],
+            image_len: 0x1_0000,
+            image_sha256: [0x7E; 32],
+        })
+        .unwrap();
+    let result = loop {
+        let event = events.recv_timeout(Duration::from_secs(2)).unwrap();
+        if let CoreEventPayload::OperationCompleted(result) = event.payload {
+            if result.operation_id == operation_id {
+                break result;
+            }
+        }
+    };
+
+    assert_eq!(result.status, OperationStatus::Failed);
+    assert_eq!(result.message, "固件烧录仅支持真实串口设备");
+    assert_eq!(actor.snapshot().phase, SnapshotPhase::Ready);
+
+    actor.shutdown().unwrap();
+    server.shutdown().unwrap();
 }
 
 #[test]

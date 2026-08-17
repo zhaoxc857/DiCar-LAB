@@ -513,6 +513,9 @@ static void handle_hello(dctp_device_t *device, const dctp_request_t *request, u
   if (device->config.persist != NULL) {
     capabilities |= DCTP_CAP_PERSISTENCE;
   }
+  if (device->config.prepare_flash != NULL) {
+    capabilities |= DCTP_CAP_PREPARE_FLASH;
+  }
   dctp_writer_t writer;
   dctp_writer_init(&writer, payload_buf(device), DCTP_MAX_PAYLOAD);
   dctp_put_u32(&writer, session_id);
@@ -884,6 +887,72 @@ static void handle_telemetry_stop(dctp_device_t *device, const dctp_request_t *r
   respond(device, request, DCTP_MSG_TELEMETRY_STOP, 0, 0);
 }
 
+static void handle_prepare_flash(dctp_device_t *device, const dctp_request_t *request) {
+  if (device->config.prepare_flash == NULL) {
+    respond_error(device, request, DCTP_ERR_UNKNOWN_MESSAGE);
+    return;
+  }
+  if (request->payload_len != DCTP_PREPARE_FLASH_PAYLOAD_LEN) {
+    respond_error(device, request, DCTP_ERR_INVALID_LENGTH);
+    return;
+  }
+  dctp_reader_t reader;
+  dctp_reader_init(&reader, request->payload, request->payload_len);
+  if (dctp_read_u8(&reader) != DCTP_FIRMWARE_FLASH_SCHEMA_VERSION) {
+    respond_error(device, request, DCTP_ERR_UNSUPPORTED_VERSION);
+    return;
+  }
+  dctp_prepare_flash_request_t prepare;
+  for (size_t index = 0; index < DCTP_FLASH_OPERATION_ID_LEN; index += 1) {
+    prepare.operation_id[index] = dctp_read_u8(&reader);
+  }
+  prepare.target_id = dctp_read_u32(&reader);
+  for (size_t index = 0; index < 3u; index += 1) {
+    prepare.firmware_version[index] = dctp_read_u16(&reader);
+  }
+  prepare.image_len = dctp_read_u32(&reader);
+  for (size_t index = 0; index < DCTP_IMAGE_SHA256_LEN; index += 1) {
+    prepare.image_sha256[index] = dctp_read_u8(&reader);
+  }
+  if (!dctp_reader_done(&reader)) {
+    respond_error(device, request, DCTP_ERR_INVALID_LENGTH);
+    return;
+  }
+  if (device->flash_transition_pending) {
+    respond_error(device, request, DCTP_ERR_BUSY);
+    return;
+  }
+
+  dctp_flash_transition_t transition;
+  memset(&transition, 0, sizeof transition);
+  memcpy(transition.operation_id, prepare.operation_id, DCTP_FLASH_OPERATION_ID_LEN);
+  if (!device->config.prepare_flash(device->config.user, &prepare, &transition)) {
+    respond_error(device, request, DCTP_ERR_NOT_READY);
+    return;
+  }
+  memcpy(transition.operation_id, prepare.operation_id, DCTP_FLASH_OPERATION_ID_LEN);
+  if (transition.bootloader_protocol == 0u || transition.initial_baud == 0u) {
+    respond_error(device, request, DCTP_ERR_INTERNAL_ERROR);
+    return;
+  }
+
+  dctp_writer_t writer;
+  dctp_writer_init(&writer, payload_buf(device), DCTP_MAX_PAYLOAD);
+  dctp_put_u8(&writer, DCTP_FIRMWARE_FLASH_SCHEMA_VERSION);
+  dctp_put_bytes(&writer, transition.operation_id, DCTP_FLASH_OPERATION_ID_LEN);
+  dctp_put_u8(&writer, transition.bootloader_protocol);
+  dctp_put_u16(&writer, transition.entry_delay_ms);
+  dctp_put_u32(&writer, transition.initial_baud);
+  if (!writer.ok || writer.len != DCTP_PREPARE_FLASH_ACK_PAYLOAD_LEN) {
+    respond_error(device, request, DCTP_ERR_INTERNAL_ERROR);
+    return;
+  }
+
+  respond(device, request, DCTP_MSG_PREPARE_FLASH_ACK, 0, (uint16_t)writer.len);
+  device->flash_transition = transition;
+  device->flash_transition_pending = true;
+}
+
 /* ------------------------------------------------------------------ */
 /* 帧调度 */
 
@@ -971,6 +1040,9 @@ static void handle_request(dctp_device_t *device, const dctp_request_t *request,
       break;
     case DCTP_MSG_TELEMETRY_STOP:
       handle_telemetry_stop(device, request);
+      break;
+    case DCTP_MSG_PREPARE_FLASH:
+      handle_prepare_flash(device, request);
       break;
     case DCTP_MSG_SESSION_CLOSE:
       handle_session_close(device, request);
@@ -1296,6 +1368,17 @@ bool dctp_device_session_active(const dctp_device_t *device) {
 
 uint32_t dctp_device_manifest_crc32(const dctp_device_t *device) {
   return device->manifest_crc32;
+}
+
+bool dctp_device_take_flash_transition(dctp_device_t *device,
+                                       dctp_flash_transition_t *transition) {
+  if (device == NULL || transition == NULL || !device->flash_transition_pending) {
+    return false;
+  }
+  *transition = device->flash_transition;
+  device->flash_transition_pending = false;
+  memset(&device->flash_transition, 0, sizeof device->flash_transition);
+  return true;
 }
 
 /* ------------------------------------------------------------------ */

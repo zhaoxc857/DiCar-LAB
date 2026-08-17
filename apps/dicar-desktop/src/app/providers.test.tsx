@@ -1,7 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import { MockBridge } from "../bridge/mockBridge";
 import { UnavailableAiPlatform } from "../ai/aiPlatform";
-import { AppProviders, useAiPlatform, useDesktopBridge } from "./providers";
+import { UnavailableFirmwareFlashPlatform } from "../firmware/firmwarePlatform";
+import {
+  AppProviders,
+  useAiPlatform,
+  useDesktopBridge,
+  useFirmwareFlashPlatform,
+} from "./providers";
 
 function BridgeConsumer() {
   const bridge = useDesktopBridge();
@@ -11,6 +17,11 @@ function BridgeConsumer() {
 function AiConsumer() {
   const ai = useAiPlatform();
   return <output>{ai.available ? "available" : "unavailable"}</output>;
+}
+
+function FirmwareConsumer() {
+  const firmware = useFirmwareFlashPlatform();
+  return <output>{firmware.available ? "firmware-available" : "firmware-unavailable"}</output>;
 }
 
 it("provides one injected DesktopBridge instance to the React tree", () => {
@@ -36,6 +47,20 @@ it("provides an independently injected AI platform", () => {
   expect(screen.getByText("unavailable")).toBeInTheDocument();
 });
 
+it("provides an independently injected firmware platform", () => {
+  const firmwarePlatform = new UnavailableFirmwareFlashPlatform();
+  render(
+    <AppProviders
+      bridge={new MockBridge()}
+      firmwarePlatform={firmwarePlatform}
+    >
+      <FirmwareConsumer />
+    </AppProviders>,
+  );
+
+  expect(screen.getByText("firmware-unavailable")).toBeInTheDocument();
+});
+
 it("fails clearly when a bridge consumer is rendered outside AppProviders", () => {
   expect(() => render(<BridgeConsumer />)).toThrow(
     "useDesktopBridge 必须在 AppProviders 内使用",
@@ -45,5 +70,11 @@ it("fails clearly when a bridge consumer is rendered outside AppProviders", () =
 it("fails clearly when an AI consumer is rendered outside AppProviders", () => {
   expect(() => render(<AiConsumer />)).toThrow(
     "useAiPlatform 必须在 AppProviders 内使用",
+  );
+});
+
+it("fails clearly when a firmware consumer is rendered outside AppProviders", () => {
+  expect(() => render(<FirmwareConsumer />)).toThrow(
+    "useFirmwareFlashPlatform 必须在 AppProviders 内使用",
   );
 });

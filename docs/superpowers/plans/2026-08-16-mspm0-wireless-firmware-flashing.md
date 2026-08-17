@@ -70,7 +70,7 @@
 
 **Files:**
 - Create: `crates/dicar-firmware-flash/src/bin/dicar-firmware-tool.rs`
-- Create: `crates/dicar-firmware-flash/src/credentials.rs`, `src/recovery_store.rs`
+- Create: `crates/dicar-firmware-flash/src/credential_store.rs`, `src/recovery_store.rs`
 - Test: CLI argument/format tests and in-memory credential/recovery backends
 
 **Interfaces:**
