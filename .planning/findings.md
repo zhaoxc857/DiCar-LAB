@@ -1,0 +1,23 @@
+# Findings
+
+- The current Codex task holds `C:\DiCar_LAB` open, so the root directory cannot be renamed safely.
+- IKUN-CAR-LAB already implements newline-delimited JSON messages (`GET`, `SET`, `CMD`, `ACK`, `TEL`) over pyserial.
+- The existing STM32 project references DCTP sources inside the old APP repository; those references must be removed during migration.
+- HC-05 is currently used at its default 9600 baud, so telemetry must be compact and non-blocking.
+- The hardware application has four tunable values and no battery ADC.
+- The current branch is a normal checkout (`git-dir == git-common-dir`) with a large in-progress migration: the old Tauri/Rust app is deleted and the new Python/PySide6 `CAR_LAB/` tree is untracked.
+- The current `build_launcher_windows.bat` packages only `DiCAR_Launcher.py`; it does not bundle the PySide6 application and resources as a self-contained desktop distribution.
+- The new desktop app already uses Python 3, PySide6, pyqtgraph, YAML vehicle profiles and JSON-Line transports. Reusing this stack is smaller and safer than restoring Tauri or adding Electron.
+- The root README describes source/launcher startup but has no end-user packaged release install flow or GitHub release process.
+- Unlimited flashing is a future workflow requirement. The current migration spec covers telemetry and parameter sync but not a repeated firmware flashing state machine.
+- Git `origin` already points to `https://github.com/zhaoxc857/DiCar_Tune.git`.
+- Python 3.14.6 and Git 2.55 are available; `uv` is not installed. The app declares PySide6, pyqtgraph, PyYAML, pyserial and bleak.
+- Global Qt styles already define hover/pressed/checked colors, but primary/danger buttons lack explicit pressed, disabled and focus states; button semantics are applied inconsistently across pages.
+- A Windows one-folder PyInstaller bundle is the lowest-risk self-contained release shape because it can carry the PySide6 app plus YAML/docs/resources without requiring a user-installed Python.
+- User selected a Windows portable ZIP as the release artifact.
+- User approved reserving an extensible, safety-first flashing boundary now while deferring actual unlimited/repeated flashing execution.
+- User no longer wants the old desktop implementation in the active product. Preserve recoverability through Git history/archive refs, but make the migrated PySide6 app the main repository state.
+- UI design search recommends a professional technical palette, immediate pressed feedback, visible keyboard focus, clearly distinct disabled states, and equal contrast treatment in light/dark modes. The existing Qt/QSS stack can satisfy these without new dependencies.
+- Final disabled-button text/background pairs measure between 4.99:1 and 7.59:1 contrast in the six semantic/theme combinations.
+- PyInstaller 6.22.2 builds the flat one-folder layout but the resulting Windows executable fails before Python code with `ImportError: DLL load failed while importing QtWidgets`. The supported default `_internal` layout preserves Qt DLL resolution and keeps the top-level EXE user-facing.
+- The decisive packaging root cause was PATH contamination from Codex bundled native tools: PyInstaller collected their `ucrtbase.dll` and `api-ms-win-*` files. A build PATH limited to the project venv and Windows system directories bundles no UCRT/API-MS copies and the frozen smoke exits 0.

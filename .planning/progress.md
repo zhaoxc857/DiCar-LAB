@@ -1,0 +1,38 @@
+# Progress
+
+- 2026-08-29: Downloaded and inspected IKUN-CAR-LAB after GitHub clone connectivity failures.
+- 2026-08-29: Confirmed safe replacement strategy and explicit authorization for selective backup plus in-place overwrite.
+- 2026-08-29: Recorded migration design and executable implementation plan.
+- 2026-08-29: Resumed after Codex terminal setup failure; confirmed no files were changed during the failure.
+- 2026-08-29: Inspected the migrated PySide6 app, launcher, build script, README, branch state and existing migration documents.
+- 2026-08-29: Identified PyInstaller packaging of the existing PySide6 stack as the minimal desktop direction; deferred implementation pending the required design review.
+- 2026-08-29: Confirmed GitHub origin, available Python/Git tools, missing uv, existing Qt interaction states and current branding tests.
+- 2026-08-29: User selected portable ZIP distribution, approved a non-executing future flashing boundary, and confirmed the old app should be replaced rather than kept alongside the new app.
+- 2026-08-29: Wrote, self-reviewed and committed the approved desktop release design as commit `1da7e11`.
+- 2026-08-29: Wrote, self-reviewed and committed the eight-task implementation plan as commit `231b886`.
+- 2026-08-29: User chose inline execution in the current migration workspace; Task 1 started.
+- 2026-08-29: Task 1 completed and committed as `7fc6b03`; version metadata is unified at v1.7.0 and real offscreen startup exits successfully.
+- 2026-08-29: Task 2 completed and committed as `b535511`; unsafe firmware state skips now raise without mutating state.
+- 2026-08-29: Task 3 completed and committed as `4871b9c`; the visible firmware workspace is disabled and has no execution backend.
+- 2026-08-29: Task 4 completed and committed as `ee00484`; rendered tests cover normal/primary/danger press, focus, disabled states, and stable geometry in both themes.
+- 2026-08-29: Task 5 completed and committed as `6fd8f9f`; the portable Windows integration test passed after sanitizing PATH to prevent host UCRT DLL contamination.
+- 2026-08-29: Task 6 completed and committed as `d0d6677`; main/PR builds test and upload artifacts, while version tags publish GitHub Release assets.
+- 2026-08-29: Task 7 completed and committed as `633a614`; desktop download, checksum, simulator-first, HC-05, and non-executing flashing guidance now agree on v1.7.0.
+- 2026-08-29: Task 8 completed; 29 tests passed with one opt-in packaging test skipped, the real packaging integration passed, and the final local ZIP checksum matched.
+- 2026-08-29: Git smart HTTP was unreachable, so the verified tree was published through GitHub's Git Database API as fast-forward commit `a7a8f314`; both Windows workflows passed and Release v1.7.0 assets were published.
+- 2026-08-29: Streamed the public Release ZIP and verified SHA-256 `0f760aabfb58d0f934049504f2af346f84c8268c8e76edf28a95bd6b50b07af6` against the published checksum.
+- 2026-08-29: Completed Dicai_TS STM32 car hardware bring-up through closed-loop line following (power, OLED, DCTP serial, line sensors, encoders, motors all verified).
+- 2026-08-29: Built stm32flash.exe from GitHub source into CAR_LAB tools for wireless ISP flashing.
+- 2026-08-29: Diagnosed HC-05 8N1 vs STM32 bootloader 8E1 parity mismatch as root cause of failed wireless ISP handshake.
+- 2026-08-29: Added firmware HC-05 AT configuration mode (hold USER button at power-on), verified AT+UART write-back, PB9->EN key control, OLED OK/NO result display, and switched firmware USART1 to 9600 8E1.
+- 2026-08-29: Added 9600 baud option to the desktop app serial dropdown and synced the CubeMX ioc metadata.
+- 2026-08-29: First fully wireless firmware flash over HC-05 succeeded (stm32flash write + verify 100%); OLED S0 OK marker confirms the new firmware.
+- 2026-08-30: Root-caused the desktop app freeze: serial open/read ran on the GUI thread; Bluetooth SPP open blocks for seconds inside the OS.
+- 2026-08-30: Moved serial I/O to a dedicated QThread worker (timer-based reads, queued close) fixing both the freeze and a port-not-released-on-disconnect deadlock; disconnect now closes the port with regression tests.
+- 2026-08-30: Diagnostics page now clears TEL rate/age on disconnect instead of showing stale values.
+- 2026-08-30: Implemented the real wireless flash backend in CAR_LAB (core/flash_backend.py + firmware_flash page) driving tools/stm32flash.exe via QProcess with preflight checks, auto-disconnect, live log and the FlashJob state machine; continuous mode intentionally deferred.
+- 2026-08-30: Clean DCTP telemetry confirmed over the HC-05 8E1 link; end-to-end in-app wireless flashing verified on hardware (OLED rotated LiYuYao marker).
+- 2026-08-30: Dev environment rebuilt on uv-managed Python 3.12 (.venv) with PySide6/pyserial/pyyaml/pyqtgraph; full suite 38 tests passing.
+- 2026-08-30: Raised the STM32F103 + HC-05 link to 115200 baud across firmware, AT config mode, vehicle profile and tests; user completed the two-step on-car upgrade.
+- 2026-08-30: Added oscilloscope recording, CSV export and replay mode (core/wave_store.py + scope UI, 5 tests); replay keeps A/B cursors and probes working.
+- 2026-08-30: Bumped the app to v1.8.0 (VERSION, version.py, CHANGELOG), versioned checksum files, bundled stm32flash.exe into the PyInstaller package, and built the verified portable desktop release DiCAR-LAB-v1.8.0-Windows-x64.zip.
