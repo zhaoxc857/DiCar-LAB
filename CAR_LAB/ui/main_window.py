@@ -145,7 +145,7 @@ class MainWindow(QMainWindow):
         self.mode = QComboBox(); self.mode.addItems(["仿真", "串口", "蓝牙串口", "BLE", "TCP"]); self.mode.setFixedWidth(115)
         row.addWidget(self.mode)
         self.port = QLineEdit("COM3"); self.port.setPlaceholderText("COM3"); self.port.setFixedWidth(78); row.addWidget(self.port)
-        self.baud = QComboBox(); self.baud.addItems(["115200", "230400", "460800", "921600"]); self.baud.setFixedWidth(100); row.addWidget(self.baud)
+        self.baud = QComboBox(); self.baud.addItems(["9600", "115200", "230400", "460800", "921600"]); self.baud.setFixedWidth(100); row.addWidget(self.baud)
         self.host = QLineEdit("127.0.0.1"); self.host.setFixedWidth(105); row.addWidget(self.host)
         self.tcp_port = QSpinBox(); self.tcp_port.setRange(1,65535); self.tcp_port.setValue(9000); self.tcp_port.setFixedWidth(78); row.addWidget(self.tcp_port)
         self.mode.currentTextChanged.connect(self._update_connection_fields)
@@ -203,7 +203,13 @@ class MainWindow(QMainWindow):
 
     def _instantiate_page(self, cls):
         if cls is FirmwareFlashPage:
-            return cls(self.config)
+            from core.flash_backend import find_stm32flash
+
+            return cls(
+                self.config,
+                transport=self.transport,
+                flash_backend=find_stm32flash(),
+            )
         if cls in (OverviewPage, ScopePage, PowerMonitor, TrackLab, MspAssistant):
             if cls is MspAssistant: return cls(self.config)
             return cls(self.bus, self.config)

@@ -7,7 +7,7 @@ vehicle:
 transport:
   type: serial
   port: COM3
-  baudrate: 9600
+  baudrate: 115200
 
 parameters:
 - key: control_enabled

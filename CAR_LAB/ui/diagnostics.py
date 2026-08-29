@@ -23,7 +23,10 @@ class DiagnosticsPage(QWidget):
         bus.tx_text.connect(self._tx); bus.event.connect(self._event); bus.parameter_sync.connect(self._param_sync)
         timer=QTimer(self); timer.timeout.connect(self._update); timer.start(500)
 
-    def _connection(self,ok,text): self.conn.setText(text)
+    def _connection(self,ok,text):
+        self.conn.setText(text)
+        if not ok:
+            self.tel_intervals.clear(); self.last_tel=None
     def _tel(self,_d):
         now=time.monotonic()
         if self.last_tel is not None:self.tel_intervals.append(now-self.last_tel)
@@ -36,16 +39,20 @@ class DiagnosticsPage(QWidget):
     def _clear(self):
         self.rx=self.tx=self.protocol_errors=0; self.tel_intervals.clear(); self.param_events.clear()
     def _update(self):
+        connected=self.transport.connected
         hz=1/(sum(self.tel_intervals)/len(self.tel_intervals)) if self.tel_intervals else 0
         age=(time.monotonic()-self.last_tel)*1000 if self.last_tel else 999999
-        self.rate.setText(f"{hz:.1f} Hz")
-        self.age.setText("--" if not self.last_tel else f"{age:.0f} ms")
+        if not connected:
+            self.rate.setText("-- Hz"); self.age.setText("-- ms")
+        else:
+            self.rate.setText(f"{hz:.1f} Hz")
+            self.age.setText("--" if not self.last_tel else f"{age:.0f} ms")
         self.counts.setText(f"RX {self.rx} / TX {self.tx}")
         self.err.setText(f"协议错误 {self.protocol_errors}")
         tips=[]
-        if self.transport.connected and age>500: tips.append("已连接但超过 500ms 没有 TEL。")
-        if 0<hz<20: tips.append("遥测低于 20Hz，实时 PID 曲线会明显变迟钝。")
-        if hz>250: tips.append("遥测高于 250Hz，JSON 串口可能成为带宽瓶颈。")
+        if connected and age>500: tips.append("已连接但超过 500ms 没有 TEL。")
+        if connected and 0<hz<20: tips.append("遥测低于 20Hz，实时 PID 曲线会明显变迟钝。")
+        if connected and hz>250: tips.append("遥测高于 250Hz，JSON 串口可能成为带宽瓶颈。")
         if self.protocol_errors: tips.append("存在协议解析错误，请查看协议监视器。")
         errors=[x["message"] for x in self.config_issues if x["severity"]=="error"]
         warns=[x["message"] for x in self.config_issues if x["severity"]!="error"]

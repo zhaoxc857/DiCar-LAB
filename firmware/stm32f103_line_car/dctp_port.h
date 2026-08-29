@@ -27,5 +27,7 @@ void dctp_port_poll(uint32_t now_ms);
 dctp_tuning_t dctp_port_get_tuning(void);
 void dctp_port_set_enabled(bool enabled);
 void dctp_port_set_telemetry(const dctp_telemetry_t *telemetry);
+void dctp_port_send_note(const char *text);
 
 #endif
+

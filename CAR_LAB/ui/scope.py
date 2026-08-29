@@ -6,8 +6,24 @@ import pyqtgraph as pg
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QListWidget,
-    QListWidgetItem, QLineEdit, QComboBox, QCheckBox, QDoubleSpinBox, QFrame
+    QListWidgetItem, QLineEdit, QComboBox, QCheckBox, QDoubleSpinBox, QFrame,
+    QFileDialog
 )
+
+from core.wave_store import load_wave_csv, save_wave_csv
+
+from datetime import datetime
+from pathlib import Path
+
+
+def waves_dir():
+    d = Path(__file__).resolve().parents[1] / "reports" / "waves"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def default_wave_name():
+    return f"波形_{datetime.now():%Y%m%d_%H%M%S}.csv"
 
 CHANNEL_NAMES = {
     "target_rpm": ("目标转速", "Target RPM"),
@@ -104,6 +120,9 @@ class ScopePage(QWidget):
         self.window_s=20.0; self.auto_y=True; self.scale_mode="局部"
         self.t=deque(maxlen=6000); self.data={}; self.channels=[]
         self.t0=time.monotonic(); self.freeze=False
+        self.recording=False; self.record_t=[]; self.record_data={}
+        self.record_cap=60000; self.record_truncated=False
+        self.replay_mode=False; self._replay_title="实时示波器"
         self.cursor_a=None; self.cursor_b=None; self.overlay_lines=[]
         # 持久曲线：每个通道一个 PlotDataItem，只更新数据而不是每帧重建，多通道下更省 CPU。
         self._palette=[(45,108,210),(220,135,40),(190,65,75),(40,155,100),(125,80,180),(40,155,165)]
@@ -116,6 +135,10 @@ class ScopePage(QWidget):
         self.search=QLineEdit(); self.search.setPlaceholderText("搜索通道"); self.search.textChanged.connect(self.filter_channels); top.addWidget(self.search,1)
         self.freeze_btn=QPushButton("冻结"); self.freeze_btn.clicked.connect(self.toggle_freeze); top.addWidget(self.freeze_btn)
         self.follow_btn=QPushButton("跟随最新"); self.follow_btn.clicked.connect(self.follow_latest); top.addWidget(self.follow_btn)
+        self.record_btn=QPushButton("开始录制"); self.record_btn.clicked.connect(self.toggle_record); top.addWidget(self.record_btn)
+        self.export_btn=QPushButton("导出CSV"); self.export_btn.clicked.connect(lambda:self._export_wave()); top.addWidget(self.export_btn)
+        self.load_btn=QPushButton("加载CSV回看"); self.load_btn.clicked.connect(lambda:self._load_wave()); top.addWidget(self.load_btn)
+        self.exit_replay_btn=QPushButton("退出回看"); self.exit_replay_btn.setEnabled(False); self.exit_replay_btn.clicked.connect(self.exit_replay); top.addWidget(self.exit_replay_btn)
         top.addWidget(QLabel("时间窗"))
         self.window=QDoubleSpinBox(); self.window.setRange(2,300); self.window.setValue(20); self.window.setSuffix(" s"); self.window.valueChanged.connect(lambda v:setattr(self,"window_s",float(v))); top.addWidget(self.window)
         self.y_mode=QComboBox(); self.y_mode.addItems(["局部","全范围","固定"]); self.y_mode.currentTextChanged.connect(self._y_mode_changed)
@@ -188,7 +211,7 @@ class ScopePage(QWidget):
                 for i in range(self.list.count()) if self.list.item(i).checkState()==Qt.CheckState.Checked]
 
     def _tel(self,d):
-        if not d:return
+        if not d or self.replay_mode:return
         now=time.monotonic()-self.t0; self.t.append(now)
         for k,v in d.items():
             if isinstance(v,(int,float)):
@@ -196,11 +219,105 @@ class ScopePage(QWidget):
                     self.channels.append(k)
                     self._rebuild_list(self._selected())
                 self.data.setdefault(k,deque(maxlen=6000)).append(float(v))
-        self.status.setText(f"实时接收 · {len(d)} 个字段")
+        if self.recording:
+            if len(self.record_t)>=self.record_cap:
+                self.record_truncated=True; self.toggle_record()
+            else:
+                self.record_t.append(now)
+                for k in self.record_data:
+                    self.record_data[k].append(None)
+                for k,v in d.items():
+                    if isinstance(v,(int,float)):
+                        if k not in self.record_data:
+                            self.record_data[k]=[None]*len(self.record_t)
+                        self.record_data[k][-1]=float(v)
+                n=len(self.record_t)
+                self.record_btn.setText(f"停止录制({n})")
+        self.status.setText(f"实时接收 · {len(d)} 个字段" +
+                            (" · 录制中" if self.recording else "") +
+                            (" · 回看模式" if self.replay_mode else ""))
+
+    def toggle_record(self):
+        if self.replay_mode:return
+        self.recording=not self.recording
+        if self.recording:
+            self.record_t=[]; self.record_data={}; self.record_truncated=False
+            self.record_btn.setText("停止录制(0)")
+        else:
+            n=len(self.record_t)
+            note="（已达上限截断）" if self.record_truncated else ""
+            self.record_btn.setText(f"开始录制")
+            self.status.setText(f"录制结束 · {n} 个样本{note}")
+
+    def _export_wave(self,path=None):
+        if self.replay_mode and path is None:
+            self.status.setText("回看模式下请直接用「另存为」原文件"); return
+        if self.recording:
+            self.toggle_record()
+        if path is None:
+            default=str(waves_dir()/default_wave_name())
+            path,_=QFileDialog.getSaveFileName(self,"导出波形CSV",default,"CSV (*.csv)")
+            if not path:return
+        times,channels=self._export_source()
+        if not times:
+            self.status.setText("没有可导出的数据"); return
+        save_wave_csv(path,times,channels)
+        self.status.setText(f"已导出 {len(times)} 个样本 → {path}")
+        return path
+
+    def _export_source(self):
+        if self.record_t:
+            return list(self.record_t),{k:list(v) for k,v in self.record_data.items()}
+        times=list(self.t)
+        return times,{k:list(v) for k,v in self.data.items()}
+
+    def _load_wave(self,path=None):
+        if path is None:
+            start=str(waves_dir()/default_wave_name())
+            path,_=QFileDialog.getOpenFileName(self,"加载波形CSV回看",start,"CSV (*.csv)")
+            if not path:return
+        try:
+            times,channels=load_wave_csv(path)
+        except Exception as e:
+            self.status.setText(f"加载失败：{e}"); return
+        if not times:
+            self.status.setText("文件里没有样本"); return
+        self._enter_replay(times,channels,str(path))
+        return path
+
+    def _enter_replay(self,times,channels,source=""):
+        self.replay_mode=True; self.recording=False
+        self.t=list(times)
+        self.data={k:list(v) for k,v in channels.items()}
+        for k in self.data:
+            if k not in self.channels:
+                self.channels.append(k)
+        self._rebuild_list(list(self.data.keys()))
+        self._replay_title="示波器（回看）"
+        self.plot.setTitle(self._replay_title)
+        self.exit_replay_btn.setEnabled(True)
+        self.record_btn.setEnabled(False)
+        self.cursor_a=None; self.cursor_b=None
+        self.reset_view(); self._draw()
+        self.status.setText(f"回看模式 · {len(times)} 个样本" + (f" · {source}" if source else ""))
+
+    def exit_replay(self):
+        self.replay_mode=False
+        self.t.clear(); self.data.clear()
+        self.plot.setTitle("实时示波器")
+        self.exit_replay_btn.setEnabled(False)
+        self.record_btn.setEnabled(True)
+        self.cursor_a=None; self.cursor_b=None
+        self._rebuild_list(self._selected())
+        self.reset_view(); self._draw()
+        self.status.setText("已退出回看，回到实时")
 
     def _times_values(self,k):
         vals=list(self.data.get(k,[])); ts=list(self.t); n=min(len(vals),len(ts))
-        return ts[-n:], vals[-n:]
+        ts=ts[-n:]; vals=vals[-n:]
+        pairs=[(t,v) for t,v in zip(ts,vals) if v is not None]
+        if not pairs:return [],[]
+        return [p[0] for p in pairs],[p[1] for p in pairs]
 
     def _color_for(self,k):
         if k not in self._color_idx:

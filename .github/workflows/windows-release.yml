@@ -42,7 +42,7 @@ jobs:
           name: DiCAR-LAB-Windows-portable
           path: |
             release/*.zip
-            release/SHA256SUMS.txt
+            release/SHA256SUMS-*.txt
           if-no-files-found: error
 
       - name: Publish GitHub Release assets
@@ -51,5 +51,5 @@ jobs:
         with:
           files: |
             release/*.zip
-            release/SHA256SUMS.txt
+            release/SHA256SUMS-*.txt
           generate_release_notes: true

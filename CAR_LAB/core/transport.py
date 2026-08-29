@@ -3,7 +3,7 @@ import math
 import socket
 import time
 from collections import deque
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, QTimer, QThread, Signal, Slot
 
 try:
     import serial
@@ -12,6 +12,76 @@ except Exception:
 
 from core.angle import angle_error_deg, wrap_deg
 from core.ble_transport import BleLink, scan_ble_devices
+
+
+class SerialWorker(QObject):
+    """Owns the serial port on a worker thread.
+
+    Opening a Bluetooth SPP COM port blocks for seconds inside Windows;
+    doing that on the GUI thread froze the whole app. The worker opens
+    the port and then reads on a timer inside its own event loop, so a
+    queued close_port() can always be processed between reads.
+    """
+
+    opened = Signal(bool, str, int)
+    rx = Signal(bytes)
+    closed = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self._serial = None
+        self._timer = None
+
+    @Slot(str, int, int)
+    def open_port(self, port, baud, generation):
+        try:
+            self._serial = serial.Serial(port, int(baud), timeout=0, write_timeout=0.2)
+        except Exception as e:
+            self._serial = None
+            self.opened.emit(False, str(e), generation)
+            return
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._read_once)
+        self._timer.start(15)
+        self.opened.emit(True, port, generation)
+
+    @Slot()
+    def _read_once(self):
+        if self._serial is None:
+            return
+        try:
+            waiting = self._serial.in_waiting
+            if waiting:
+                data = self._serial.read(waiting)
+                if data:
+                    self.rx.emit(bytes(data))
+        except Exception as e:
+            self._teardown()
+            self.opened.emit(False, str(e), -1)
+
+    @Slot()
+    def close_port(self):
+        self._teardown()
+
+    @Slot(bytes)
+    def write(self, data):
+        if self._serial is not None:
+            try:
+                self._serial.write(data)
+            except Exception:
+                pass
+
+    def _teardown(self):
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        if self._serial is not None:
+            try:
+                self._serial.close()
+            except Exception:
+                pass
+            self._serial = None
+            self.closed.emit()
 
 
 def _virtual_track_curvature(progress: float) -> float:
@@ -35,6 +105,11 @@ def _virtual_track_curvature(progress: float) -> float:
 
 
 class TransportManager(QObject):
+    # queued to the serial worker thread
+    _serial_open_sig = Signal(str, int, int)
+    _serial_close_sig = Signal()
+    _serial_write_sig = Signal(bytes)
+
     def __init__(self, bus, protocol, config):
         super().__init__()
         self.bus = bus
@@ -45,6 +120,20 @@ class TransportManager(QObject):
         self.sock = None
         self.ble_link = BleLink()
         self.connected = False
+        self._serial_thread = None
+        self._serial_worker = None
+        self._serial_generation = 0
+        self._serial_meta = ("串口", "", 0)
+        self._serial_thread = QThread()
+        self._serial_thread.setObjectName("serial-worker")
+        self._serial_worker = SerialWorker()
+        self._serial_worker.moveToThread(self._serial_thread)
+        self._serial_thread.start()
+        self._serial_open_sig.connect(self._serial_worker.open_port)
+        self._serial_close_sig.connect(self._serial_worker.close_port)
+        self._serial_write_sig.connect(self._serial_worker.write)
+        self._serial_worker.opened.connect(self._on_serial_opened)
+        self._serial_worker.rx.connect(self._on_serial_rx)
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._poll)
         self.poll_timer.start(10)
@@ -137,14 +226,42 @@ class TransportManager(QObject):
         self._service_param_queue()
 
     def connect_serial(self, port, baud, label="串口"):
+        """Asynchronously open the port on the worker thread.
+
+        Bluetooth SPP ports can block for many seconds inside the OS;
+        everything here returns immediately and the result arrives via
+        the opened signal, keeping the GUI responsive.
+        """
         self.disconnect()
         if serial is None:
             raise RuntimeError("未安装 pyserial")
-        self.serial_obj = serial.Serial(port, int(baud), timeout=0)
+        self._serial_generation += 1
         self.kind = "serial"
-        self.connected = True
-        self.bus.connection.emit(True, f"{label} {port} @ {baud}")
-        self._service_param_queue()
+        self._serial_meta = (label, port, int(baud))
+        self.bus.connection.emit(False, f"{label} {port} 连接中…")
+        self._serial_open_sig.emit(port, int(baud), self._serial_generation)
+
+    def _on_serial_opened(self, ok, message, generation):
+        if generation != -1 and generation != self._serial_generation:
+            return
+        if ok:
+            label, port, baud = self._serial_meta
+            self.connected = True
+            self.bus.connection.emit(True, f"{label} {port} @ {baud}")
+            self._service_param_queue()
+        else:
+            self.connected = False
+            self.kind = None
+            self.bus.connection.emit(False, f"连接失败: {message}")
+
+    def _on_serial_rx(self, data):
+        if self.kind == "serial":
+            self.protocol.feed(data)
+
+    def shutdown(self):
+        self.disconnect()
+        self._serial_thread.quit()
+        self._serial_thread.wait(2000)
 
     def connect_tcp(self, host, port):
         self.disconnect()
@@ -160,16 +277,15 @@ class TransportManager(QObject):
 
     def disconnect(self):
         self.sim_timer.stop()
-        if self.serial_obj is not None:
-            try: self.serial_obj.close()
-            except Exception: pass
+        if self.kind == "serial":
+            self._serial_generation += 1
+            self._serial_close_sig.emit()
         if self.sock is not None:
             try: self.sock.close()
             except Exception: pass
         if self.kind == "ble" or self.ble_link.thread is not None:
             try: self.ble_link.stop()
             except Exception: pass
-        self.serial_obj = None
         self.sock = None
         was = self.connected
         self.connected = False
@@ -185,7 +301,7 @@ class TransportManager(QObject):
         if self.kind == "sim":
             self._sim_receive(obj)
         elif self.kind == "serial":
-            self.serial_obj.write(raw)
+            self._serial_write_sig.emit(raw)
         elif self.kind == "tcp":
             self.sock.sendall(raw)
         elif self.kind == "ble":
@@ -346,11 +462,7 @@ class TransportManager(QObject):
         if not self.connected:
             return
         try:
-            if self.kind == "serial" and self.serial_obj:
-                n = self.serial_obj.in_waiting
-                if n:
-                    self.protocol.feed(self.serial_obj.read(n))
-            elif self.kind == "tcp" and self.sock:
+            if self.kind == "tcp" and self.sock:
                 try:
                     data = self.sock.recv(65536)
                     if data:

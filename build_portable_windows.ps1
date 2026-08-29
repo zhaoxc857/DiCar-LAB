@@ -10,8 +10,11 @@ if ($version -notmatch '^\d+\.\d+\.\d+$') {
 }
 
 $venvPython = Join-Path $projectRoot "CAR_LAB\.venv\Scripts\python.exe"
+$rootVenvPython = Join-Path $projectRoot ".venv\Scripts\python.exe"
 $python = if (Test-Path -LiteralPath $venvPython) {
     $venvPython
+} elseif (Test-Path -LiteralPath $rootVenvPython) {
+    $rootVenvPython
 } else {
     (Get-Command python -ErrorAction Stop).Source
 }
@@ -23,7 +26,7 @@ $workPath = Join-Path $buildRoot "work"
 $releasePath = Join-Path $projectRoot "release"
 $archiveName = "DiCAR-LAB-v$version-Windows-x64.zip"
 $archivePath = Join-Path $releasePath $archiveName
-$checksumPath = Join-Path $releasePath "SHA256SUMS.txt"
+$checksumPath = Join-Path $releasePath "SHA256SUMS-v$version.txt"
 
 foreach ($output in ($archivePath, $checksumPath)) {
     if (Test-Path -LiteralPath $output) {

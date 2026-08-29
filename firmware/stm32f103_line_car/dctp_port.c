@@ -369,6 +369,36 @@ void dctp_port_set_telemetry(const dctp_telemetry_t *telemetry)
     }
 }
 
+void dctp_port_send_note(const char *text)
+{
+    char line[TX_BUFFER_SIZE];
+    size_t out = 0u;
+    size_t in = 0u;
+
+    if (text == NULL) {
+        return;
+    }
+    line[0] = '\0';
+    out = (size_t)snprintf(line, sizeof line,
+                           "{\"type\":\"NOTE\",\"data\":\"");
+    while ((text[in] != '\0') &&
+           ((out + 6u) < ((size_t)sizeof line - 3u))) {
+        const char c = text[in];
+
+        if ((c == '"') || (c == '\\')) {
+            line[out++] = ' ';
+        } else if ((c >= 0x20u) && (c < 0x7fu)) {
+            line[out++] = c;
+        }
+        ++in;
+    }
+    line[out++] = '"';
+    line[out++] = '}';
+    line[out++] = '\n';
+    line[out] = '\0';
+    queue_tx(line, true);
+}
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart == &huart1) {
