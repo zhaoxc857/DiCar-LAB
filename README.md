@@ -1,142 +1,149 @@
-# DiCar Tune
+# DiCAR LAB
 
-面向电子设计大赛与智能车竞赛的无线调参、遥测和参数固化工作台。
+> A unified desktop tuning workbench for smart cars (differential / Ackermann / four-wheel …).
+> Real-time telemetry oscilloscope, online PID tuning, reliable parameter sync, track & corner analysis — with a built-in simulator so you can try everything without hardware.
 
-DiCar Tune 通过 DCTP v1 协议连接车辆，在桌面端集中完成参数读取、RAM 调参、Flash 固化、编码器标定、最多 8 路实时波形和链路诊断。当前版本为 **0.2.0**，优先支持 Windows 桌面 App，并提供可直接体验的内置模拟器。
+**CAR LAB** 是一个通用智能车调车上位机（PySide6 桌面程序）。它把「实时示波器 + 在线 PID 调参 + 可靠参数同步 + 赛道/弯道分析」整合在一个界面里，通过统一的 JSON 串行协议与 MCU 通信，支持串口 / 蓝牙串口 / BLE / TCP，并**内置仿真车**——不接硬件也能完整体验全部功能。
 
-> 无线串口模块只负责透明传输。连接真实车辆时，车端 MCU 必须运行兼容的 DCTP 固件；仓库自带 C99 车端参考库（[firmware/dctp-device](firmware/dctp-device/README.md)），可直接移植到常见竞赛 MCU。
+![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.10%2B-green) ![gui](https://img.shields.io/badge/GUI-PySide6-orange)
 
-## 下载 Windows 0.2.0
+---
 
-| 版本 | 适用场景 | 下载 |
+## 下载桌面版
+
+Windows 10/11 x64 用户可直接从 [GitHub Releases](https://github.com/zhaoxc857/DiCar_Tune/releases) 下载 `DiCAR-LAB-v1.7.0-Windows-x64.zip`。桌面版已经包含 Python 与运行依赖，无需安装 Python、PySide6 或开发工具。
+
+1. 完整解压 ZIP，不要直接在压缩包内运行。
+2. 双击 `DiCAR LAB.exe`。
+3. 第一次使用先在顶部把「连接方式」选为「仿真」，再点「连接」。确认界面与示波器正常后，再连接真实车辆。
+
+可同时下载 `SHA256SUMS.txt`，在 PowerShell 中校验文件：
+
+```powershell
+Get-FileHash .\DiCAR-LAB-v1.7.0-Windows-x64.zip -Algorithm SHA256
+```
+
+输出应与 `SHA256SUMS.txt` 中对应记录一致。
+
+## ✨ 功能特性
+
+- **实时调试**
+  - 总览：车速、RPM、航向角、角速度、电池、转向输出关键量一屏掌握
+  - 中文示波器：中文曲线名 + 协议 key 辅助；工作组一键选通道（速度 / 航向 / 角速度 / 电源 / 电机 / 循迹）；A/B 双游标测 Δt、鼠标探针、冻结、时间窗、局部/全范围 Y 轴
+  - Speed Lab / Heading Lab：速度环、航向外环 + 角速度内环在线整定，误差曲线单独放大
+  - 自定义环：任意 PID 环字段映射，支持普通 / 专家两种模式
+- **车辆实验**：AI 规则调参与阶跃测试、电源 ADC 监控、单电机实验、多电机一致性 / IMU 零偏检查
+- **参数与赛道**：统一读写 MCU 参数、参数方案保存/恢复、赛道工程（圈速 + Corner Analyzer 入弯/出弯/弯道耗时分析）、实验档案与曲线比较
+- **可靠参数同步**：发送缓冲区、同 key 合并、`seq` 序号、ACK `ok/error`、超时重试、回读校验、断线保留待发送
+- **多种连接**：仿真 / 串口 / 蓝牙串口 / BLE GATT / TCP
+- **工具**：系统诊断、协议监视器（TX/RX 原始报文）、MSP（MSPM0 / MSP430）接入帮助
+
+## 🚗 支持的车型
+
+车型由 `CAR_LAB/vehicles/` 下的 YAML 描述，切换车型自动重新加载字段映射与连接默认值：
+
+通用两轮差速、通用四电机差速、Ackermann 舵机转向、**麦克纳姆轮全向车**、**两轮平衡车**、**舵机循迹车**、MSPM0 / MSP430 / STM32 双电机、ESP32 Wi‑Fi、BLE 无线车、双/四电机仿真车，以及**自定义车型模板**。
+
+> **麦轮专属支持**：电机层 FL/FR/RL/RR（`fl_rpm`/`fr_rpm`/`rl_rpm`/`rr_rpm`）、底盘运动解算层 Vx/Vy/Wz（目标 + 实际，方便直接调底盘 PID）、示波器「麦轮运动」专属工作组。
+
+**车型插件化**：既支持旧的扁平文件 `vehicles/<name>.yaml`，也支持插件目录 `vehicles/<name>/config.yaml`——**新增一个车型只需加一个文件夹**，不会因为加功能而丢车型。字段含义与贡献步骤见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 📦 环境要求
+
+- 桌面版：Windows 10/11 x64，无需安装 Python
+- 源码开发：Python **3.10+**（发布构建使用 3.12）
+- 源码依赖：PySide6、pyqtgraph、PyYAML、pyserial、bleak（见 `CAR_LAB/requirements.txt`）
+
+## 🚀 快速开始
+
+### 方式 A：桌面便携版（Windows，推荐给使用者）
+
+从 GitHub Releases 下载并解压便携包，双击 **`DiCAR LAB.exe`**。程序不写入系统目录，不需要安装器；整个目录可直接移动或删除。
+
+### 方式 B：手动运行（推荐给开发者）
+
+```bash
+cd CAR_LAB
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
+# source .venv/bin/activate
+
+pip install -r requirements.txt
+python main.py
+```
+
+### 第一次先跑仿真
+
+启动后在顶部「连接方式」选择 **仿真**，点 **连接**。此时会有一台虚拟车持续回传遥测数据，你可以立即体验示波器、Speed/Heading Lab、参数同步等全部功能，无需任何硬件。
+
+## 🔌 通信协议（概览）
+
+上位机与 MCU 之间使用 **一行一条 JSON**（UTF-8，`\n` 分隔）：
+
+| 方向 | 类型 | 示例 |
 | --- | --- | --- |
-| 安装版 | 日常使用，创建标准 Windows 安装 | [DiCar Tune 0.2.0 Setup](release/DiCar-Tune-0.2.0-Windows-x64-Setup.exe) |
-| 便携版 | 免安装测试，直接运行可执行文件 | [DiCar Tune 0.2.0 Portable](release/DiCar-Tune-0.2.0-Windows-x64-Portable.exe) |
+| MCU → PC | `TEL` 遥测 | `{"type":"TEL","data":{"actual_rpm":812.3,"yaw":1.2}}` |
+| PC → MCU | `SET` 写参数 | `{"type":"SET","key":"speed_kp","value":0.9,"seq":12}` |
+| PC → MCU | `GET` 读参数 | `{"type":"GET","key":"speed_kp","seq":13}` |
+| PC → MCU | `CMD` 指令 | `{"type":"CMD","key":"target_rpm","value":500}` |
+| MCU → PC | `ACK` 确认 | `{"type":"ACK","key":"speed_kp","value":0.9,"seq":12,"ok":true}` |
 
-两个版本都包含内置模拟器、精准控制台和天猛星 MSPM0G3507 无线烧录页面，不需要额外启动后台服务。发布文件尚未进行商业代码签名，Windows 首次运行时可能显示安全提示。完整校验值见 [SHA256SUMS.txt](release/SHA256SUMS.txt)。
+完整协议与可靠参数同步实现要点见 [`CAR_LAB/docs/MCU_to_PC_通信协议与可靠参数同步开发手册_v1.3.1.md`](CAR_LAB/docs/MCU_to_PC_通信协议与可靠参数同步开发手册_v1.3.1.md)。
 
-## 5 分钟体验
+### STM32F103 + HC-05 快速连接
 
-1. 下载并启动安装版或便携版。
-2. 点击顶部设备状态芯片，打开“设备连接”抽屉。
-3. 在“连接”分区保持“模拟器体验”，点击“连接模拟器”，等待状态变为“已就绪”。
-4. 从“工作区”的“实时调参与波形”卡片或顶部导航打开“实时调试”。
-5. 修改一个参数并点击“写入 RAM”，观察待固化状态。
-6. 打开波形通道，体验暂停、时间窗口、游标、标记和原始波形记录回放。
-7. 点击“审阅并固化”，确认 RAM 与 Flash 的差异后完成模拟固化。
+1. MCU 与 HC-05 使用 9600 baud 串口，按上方 JSON Line 协议每行发送一条 UTF-8 JSON。
+2. Windows 先配对 HC-05，记下系统分配的串口号。
+3. 软件选择 `STM32F103 循迹车` 车型与「串口」连接方式，选择对应 COM 口后连接。
+4. 先架空车轮并保持急停可用，再验证遥测、ACK 与参数回读；不要在未限幅、未配置通信超时停车时落地运行。
 
-## 已实现功能
+## 🗂️ 目录结构
 
-- 新旧 UI 兼容工作区：首页以 2×2 卡片提供“实时调参与波形、数据记录与回放、参数方案、连接与链路诊断”四个真实入口，下方保留当前车辆与最近记录；顶部导航仍提供“概览、实时调试、波形记录、诊断”，连接、硬件指南和偏好统一集中在设备抽屉。
-- 实时工作台支持“标准模式 / 赛道模式”；两种模式复用同一组件树和设备状态，切换只改变布局密度，不发送设备命令。
-- 可切换的“通用 Manifest”与 DiCar 差速车任务工作区，支持受限 YAML 车型导入。
-- 速度环按目标/实际/误差/输出组织参数与遥测，推荐通道只预选、确认后才订阅。
-- 由设备 Manifest 驱动的数值、布尔和枚举参数控件。
-- RAM、Flash、Revision 和断线未知状态分别展示。
-- 编码器左右 PPR、正交倍频、只读 CPR、方向、轮径、传动比和测速过滤参数。
-- 最多 8 路混合类型遥测波形，支持暂停、游标、窗口、标记和数据表。
-- nanoUART-wl、HC-05 Bluetooth SPP 和通用 COM 配置。
-- 自动波特率探测、串口类型显示、链路带宽保护和连接诊断。
-- Owner、Tuner、Observer 本地演示权限与单车控制权提示。
-- 参数方案：从首页卡片或工作台按钮打开同一个方案管理器，保存整组 RAM 参数、按稳定 ID 审阅差异后应用、导出 JSON；固化成功自动生成带 Generation 的固化记录。旧 `/parameter-sets` 链接会兼容跳转到该面板，不提供参数方案导入。
-- Windows 桌面 AI 自动调参（DeepSeek API，用户自备 Key）：阶跃实验 → 本地指标提取 → AI 决策 → 范围与步长限幅写入 RAM，本地看门狗失稳即回滚最佳参数，永不自动固化。请求由 Rust 固定转发到官方 HTTPS 端点，Key 只保存在 Windows Credential Manager。
-- 独立波形记录页面：从 Bridge 原始批次记录最长 5 分钟，最多 20 条 / 256 MiB；支持自动封存、最旧记录清理、schema v1 JSON 导入导出、宽表 CSV 和独立时间轴回放。
-- 内置 DCTP 模拟器、协议重试、CRC、会话和参数版本冲突处理。
-- 车端 DCTP v1 参考库（纯 C99、零动态分配），由 Rust 权威实现和黄金向量逐字节交叉验证。
-- 天猛星 MSPM0G3507 无线固件升级软件链：签名 `.dicarfw`、每设备 BSL 凭据、
-  HC-05/nanoUART-wl 9600 8N1、TI ROM BSL、主机恢复包和不可取消关键阶段。
-  当前发布包已通过软件门禁和 Windows 启动烟测，实板链路与中断恢复仍待验收。
-
-## 无线固件升级首版
-
-HC-05 和 nanoUART-wl 在烧录流程中只是透明串口，真正执行擦除、写入、CRC 校验和启动的是 MSPM0G3507 ROM BSL。首版流程固定为：
-
-```text
-DCTP 就绪与安全检查
-  → PREPARE_FLASH 安全停机并释放串口
-  → TI ROM BSL 9600 8N1
-  → 解锁、擦除、分块写入、CRC 校验
-  → 启动应用并按设备 ID/版本重连核对
+```
+DiCar_Tune/
+├── DiCAR_Launcher.py / .bat   # 图形化启动器（建虚拟环境 + 装依赖 + 启动）
+├── dicar_lab.spec             # Windows 桌面版冻结配置
+├── build_portable_windows.bat # 生成便携 ZIP
+├── CAR_LAB/
+│   ├── main.py               # 程序入口
+│   ├── core/                 # 数据总线、协议、传输(串口/BLE/TCP/仿真)、配置、分析
+│   ├── ui/                   # 各功能页面（示波器、Speed/Heading Lab、赛道工程…）
+│   ├── vehicles/             # 车型（扁平 *.yaml 或插件目录 <name>/config.yaml）
+│   ├── docs/                 # 各版本说明与 MCU 通信协议手册
+│   └── requirements.txt
+├── LICENSE
+├── CHANGELOG.md
+└── README.md
 ```
 
-入口位于顶部“设备连接”抽屉的“设备固件”区域。它只在 Windows 桌面版、真实 HC-05/nanoUART-wl 串口、9600 baud 且设备会话就绪时开放；核心层还会拒绝无 Owner 控制权、存在待固化参数、设备未声明能力、缺少设备凭据/可信公钥/恢复包或目标不匹配的请求。擦除开始后的失败不会假装成功，升级锁会保持到用户重试或刷回已验证恢复包。
+## ⚠️ 安全提示
 
-目前只实现天猛星 MSPM0G3507。MSPM0G3519 与 STM32F1/F4 仍是后续适配目标；实体 HC-05/nanoUART-wl、NONMAIN 配置、掉电中断和回滚没有完成硬件验收。详细准备、签名、配置和人工恢复步骤见[无线固件升级指南](docs/wireless-firmware-flashing.md)。
+上位机**不是唯一安全层**。真实车辆的 MCU 必须独立实现：通信超时停车、输出限幅、异常保护和必要的物理急停。切勿仅依赖上位机保证安全。
 
-## 车型配置
+### 无限烧录路线图
 
-设备抽屉“偏好”分区中的“车型配置”决定 App 如何把 Manifest 组织为控制环、参数任务和波形预设。它不会增加设备命令，也不会覆盖设备给出的类型、范围、可写性、RAM 或 Flash 真值。内置配置位于 `apps/dicar-desktop/src/vehicleProfiles/builtins/`；用户可从“管理车型配置”导入 `.yaml`/`.yml`。
+v1.7.0 已加入「固件烧录」工作区和严格任务状态机，先固定目标识别、文件选择、校验、烧录、验证、取消与失败恢复的安全边界。运行按钮目前保持禁用，且没有连接任何外部烧录工具：**本版本不会执行任何烧录命令**。
 
-配置按区分大小写的完整 `machine_name` 精确绑定。缺失引用会显示兼容性提示并保留仍可用部分；完全不兼容时仍可通过“全部参数”或“通用 Manifest”访问设备清单。用户配置最多 16 个、合计 2 MiB，单文件最多 256 KiB；同 ID 更新必须明确确认替换，且不能覆盖内置 ID。
+后续无限烧录将通过可替换后端扩展，并保留每次烧录前校验、写后验证、可取消、可审计日志和失败即停等约束。启用真实烧录前仍需针对具体芯片、探针、供电与恢复流程单独验证。
 
-## 硬件兼容性
-
-| 硬件/入口 | 当前支持 | 推荐设置 | 遥测安全上限 |
-| --- | --- | --- | --- |
-| nanoUART-wl | Windows 桌面真实串口 | 自动探测，优先 460800 baud | 460800 baud 时最多 8 通道 × 500 Hz |
-| HC-05 | Windows Bluetooth Classic SPP 传出 COM | 先在 Windows 配对，再自动探测 | 通常 4 通道 × 50 Hz；9600 baud 时 2 通道 × 10 Hz |
-| 通用串口 | Windows 桌面 COM | 选择与 MCU 一致的波特率 | 根据波特率自动限制 |
-| Web Serial | 可发现并授权浏览器串口 | Chromium 系浏览器 | 真实 DCTP 会话尚未接入 |
-
-真实硬件的接线、Windows 配对和故障排查见[用户手册](docs/user-guide.md)。
-
-## 文档
-
-- [用户手册：安装、接线、调参、波形与排障](docs/user-guide.md)
-- [MSPM0G3507 无线固件升级：条件、操作、恢复与配置](docs/wireless-firmware-flashing.md)
-- [开发文档：架构、环境、测试、协议与打包](docs/development.md)
-- [DCTP v1 协议设计](docs/superpowers/specs/2026-08-10-dicar-serial-collaboration-protocol-design.md)
-
-## 当前限制
-
-- 无线固件升级的软件实现首版只支持天猛星 MSPM0G3507；`release/` 0.2.0
-  已包含烧录页面与桌面后台，但 ARM 交叉编译、HC-05/nanoUART-wl 和天猛星实板流程尚未验收。
-- 纯 Web 客户端不能建立真实 DCTP 设备会话，且不在当前开发范围内。
-- AI 调参仅 Windows 桌面版可用；浏览器、Web Serial 和非 Tauri Mock 不接受或保存 API Key。
-- 权限和控制权是本地演示策略，不是云端安全或分布式租约系统。
-- 云账户、团队协作、远程控制、插件市场和多车并发不在当前开发范围内。
-- AI 自动调参需要联网调用 DeepSeek API；实验编排要求车端把目标量（如目标速度）暴露为可写数值参数，且首轮应在架空或安全条件下进行。模型名可配置，API 地址固定且不跟随重定向。
-- 手机、平板、macOS 和 Linux 客户端不在当前开发范围内。
-- nanoUART-wl 与 HC-05 的软件适配已完成；待用户确认硬件准备好后，再进行具体模块、固件和赛场环境的实体链路验证。
-
-## 开发与验证
-
-需要 Node.js 22 或更高、pnpm 11 和 Rust stable：
+## 开发与构建
 
 ```powershell
-pnpm install --frozen-lockfile
-pnpm dev
+# 运行测试
+.\CAR_LAB\.venv\Scripts\python.exe -m unittest discover -s tests -v
+
+# 生成 release\DiCAR-LAB-v1.7.0-Windows-x64.zip
+.\build_portable_windows.bat
 ```
 
-浏览器打开 `http://127.0.0.1:5173/`。完整构建、测试、模拟器和 Windows 打包命令见[开发文档](docs/development.md)。
+GitHub Actions 会在 pull request 与 main 分支更新时执行测试和 Windows 构建；推送 `v*` 标签时会把 ZIP 与 `SHA256SUMS.txt` 发布到 GitHub Releases。
 
-常用质量门禁：
+## 🤝 贡献
 
-```powershell
-pnpm lint
-pnpm typecheck
-pnpm test -- --run
-pnpm build
-pnpm test:e2e
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features --offline -- -D warnings
-cargo test --workspace --all-targets --offline
-```
+欢迎 Issue 与 Pull Request。新增车型（v1.6.1 插件化后）只需在 `vehicles/` 下加一个目录即可；新增控制环可用「自定义环 + 专家模式」直接映射 MCU 字段。
 
-## 仓库结构
+## 📄 许可证
 
-| 路径 | 内容 |
-| --- | --- |
-| `apps/dicar-desktop/` | React UI、Tauri Windows 后端与桌面集成测试 |
-| `crates/dctp-protocol/` | DCTP v1 权威线级类型、编解码与校验 |
-| `crates/dicar-app-core/` | 会话、权限、参数真值、遥测和串口 actor |
-| `crates/dicar-firmware-flash/` | `.dicarfw`、TI ROM BSL、设备配置与恢复工具 |
-| `firmware/dctp-device/` | 可移植的 C99 DCTP 设备端库 |
-| `firmware/targets/` | 具体 MCU/开发板安全切换适配层 |
-| `test-vectors/dctp-v1/` | Rust 生成、C 逐字节复现的 8 个黄金向量 |
-| `docs/` | 用户手册、开发文档、协议规格和烧录指南 |
-| `release/` | Windows 0.2.0 安装版、便携版及 SHA-256 清单 |
-
-## 项目状态
-
-0.2.0 在首个硬件兼容版本上增加安全桌面 AI 通道、本机原始波形记录/回放、精准控制台和 MSPM0G3507 无线烧录软件链，并兼容恢复旧首页的四功能入口。`release/` 内安装版和便携版均包含当前界面与桌面后台；项目仍处于早期迭代阶段，真实车辆接入前仍应先在断电、安全架起或低功率条件下验证参数范围、控制方向和恢复路径。
+本项目采用 [MIT License](LICENSE) 开源。你可以自由使用、修改、分发与商用，仅需保留版权与许可声明。
