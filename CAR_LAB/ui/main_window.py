@@ -24,6 +24,7 @@ from ui.chassis_debug import ChassisDebugPage
 from ui.chassis_motion import ChassisMotionPage
 from ui.experiment_history import ExperimentHistoryPage
 from ui.diagnostics import DiagnosticsPage
+from ui.firmware_flash import FirmwareFlashPage
 from ui.theme import THEME_STYLES, apply_plot_theme, make_ikun_icon
 
 
@@ -53,6 +54,7 @@ PAGE_DEFS = [
         ("系统诊断", "通信和车辆状态诊断", DiagnosticsPage),
         ("协议监视器", "查看 TX / RX 原始报文", ProtocolMonitor),
         ("MSP 适配", "MSPM0 / MSP430 接入帮助", MspAssistant),
+        ("固件烧录", "安全校验、烧录与写后验证", FirmwareFlashPage),
     ]),
 ]
 
@@ -200,6 +202,8 @@ class MainWindow(QMainWindow):
         return side
 
     def _instantiate_page(self, cls):
+        if cls is FirmwareFlashPage:
+            return cls(self.config)
         if cls in (OverviewPage, ScopePage, PowerMonitor, TrackLab, MspAssistant):
             if cls is MspAssistant: return cls(self.config)
             return cls(self.bus, self.config)
