@@ -29,9 +29,11 @@ def main():
         win=MainWindow(bus,transport,config)
         win.resize(1500,920)
         win.show()
+        app.aboutToQuit.connect(transport.shutdown)
         if os.environ.get("DICAR_SMOKE_TEST") == "1":
             app.processEvents()
             win.close()
+            transport.shutdown()
             return 0
         return app.exec()
     except Exception as exc:

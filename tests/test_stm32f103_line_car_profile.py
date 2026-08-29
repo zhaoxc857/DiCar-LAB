@@ -20,7 +20,7 @@ class Stm32LineCarProfileTests(unittest.TestCase):
         cfg = self.load_profile()
         self.assertEqual("stm32f103_line_car", cfg["vehicle"]["id"])
         self.assertEqual("serial", cfg["transport"]["type"])
-        self.assertEqual(9600, cfg["transport"]["baudrate"])
+        self.assertEqual(115200, cfg["transport"]["baudrate"])
 
     def test_exposes_only_required_tuning_parameters(self):
         cfg = self.load_profile()

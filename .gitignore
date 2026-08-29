@@ -49,3 +49,7 @@ release/
 *.7z
 *.exe
 !DiCAR_Launcher.bat
+
+# ---- 内置烧录工具（打包与 CI 依赖，需入库）----
+!tools/
+!tools/stm32flash.exe

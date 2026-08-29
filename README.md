@@ -11,7 +11,7 @@
 
 ## 下载桌面版
 
-Windows 10/11 x64 用户可直接从 [GitHub Releases](https://github.com/zhaoxc857/DiCar_Tune/releases) 下载 `DiCAR-LAB-v1.7.0-Windows-x64.zip`。桌面版已经包含 Python 与运行依赖，无需安装 Python、PySide6 或开发工具。
+Windows 10/11 x64 用户可直接从 [GitHub Releases](https://github.com/zhaoxc857/DiCar_Tune/releases) 下载 `DiCAR-LAB-v1.8.0-Windows-x64.zip`。桌面版已经包含 Python 与运行依赖，无需安装 Python、PySide6 或开发工具。
 
 1. 完整解压 ZIP，不要直接在压缩包内运行。
 2. 双击 `DiCAR LAB.exe`。
@@ -20,7 +20,7 @@ Windows 10/11 x64 用户可直接从 [GitHub Releases](https://github.com/zhaoxc
 可同时下载 `SHA256SUMS.txt`，在 PowerShell 中校验文件：
 
 ```powershell
-Get-FileHash .\DiCAR-LAB-v1.7.0-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\DiCAR-LAB-v1.8.0-Windows-x64.zip -Algorithm SHA256
 ```
 
 输出应与 `SHA256SUMS.txt` 中对应记录一致。
@@ -124,7 +124,7 @@ DiCar_Tune/
 
 ### 无限烧录路线图
 
-v1.7.0 已加入「固件烧录」工作区和严格任务状态机，先固定目标识别、文件选择、校验、烧录、验证、取消与失败恢复的安全边界。运行按钮目前保持禁用，且没有连接任何外部烧录工具：**本版本不会执行任何烧录命令**。
+v1.8.0 已接入真实无线烧录：固件烧录页通过内置 stm32flash 与 HC-05 蓝牙串口直接烧录 STM32 固件（自动断开车辆连接、实时日志、失败诊断）。使用前将车辆 BOOT0 跳线帽置于 1 并断电重启，烧录完成后拨回 0。
 
 后续无限烧录将通过可替换后端扩展，并保留每次烧录前校验、写后验证、可取消、可审计日志和失败即停等约束。启用真实烧录前仍需针对具体芯片、探针、供电与恢复流程单独验证。
 
@@ -134,7 +134,7 @@ v1.7.0 已加入「固件烧录」工作区和严格任务状态机，先固定�
 # 运行测试
 .\CAR_LAB\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
-# 生成 release\DiCAR-LAB-v1.7.0-Windows-x64.zip
+# 生成 release\DiCAR-LAB-v1.8.0-Windows-x64.zip
 .\build_portable_windows.bat
 ```
 
