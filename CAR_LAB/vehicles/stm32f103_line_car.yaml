@@ -1,0 +1,72 @@
+vehicle:
+  id: stm32f103_line_car
+  display_name: STM32F103 · 8路巡线车
+  type: STM32F103 / HC-05
+  order: 10
+
+transport:
+  type: serial
+  port: COM3
+  baudrate: 9600
+
+parameters:
+- key: control_enabled
+  label: 巡线使能
+  default: 0
+- key: base_pwm
+  label: 基础 PWM
+  default: 20
+- key: line_kp
+  label: 巡线 Kp
+  default: 4
+- key: line_kd
+  label: 巡线 Kd
+  default: 2
+
+channel_names:
+  line_0: 灰度 0
+  line_1: 灰度 1
+  line_2: 灰度 2
+  line_3: 灰度 3
+  line_4: 灰度 4
+  line_5: 灰度 5
+  line_6: 灰度 6
+  line_7: 灰度 7
+  line_bits: 灰度位图
+  line_error: 巡线误差
+  left_count: 左编码器累计
+  right_count: 右编码器累计
+  left_cps: 左轮计数/秒
+  right_cps: 右轮计数/秒
+  left_pwm: 左轮 PWM
+  right_pwm: 右轮 PWM
+
+scope_presets:
+  巡线核心:
+  - line_error
+  - left_cps
+  - right_cps
+  - left_pwm
+  - right_pwm
+  灰度原始:
+  - line_0
+  - line_1
+  - line_2
+  - line_3
+  - line_4
+  - line_5
+  - line_6
+  - line_7
+  编码器累计:
+  - left_count
+  - right_count
+
+telemetry:
+- key: line_error
+- key: line_bits
+- key: left_count
+- key: right_count
+- key: left_cps
+- key: right_cps
+- key: left_pwm
+- key: right_pwm
