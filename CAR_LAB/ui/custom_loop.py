@@ -1,7 +1,7 @@
 
 from collections import deque
 import json, sys, time
-from pathlib import Path
+from core.paths import data_root
 import pyqtgraph as pg
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
@@ -20,7 +20,7 @@ class CustomLoopLab(QWidget):
     def __init__(self,bus,transport,config):
         super().__init__()
         self.bus=bus; self.transport=transport; self.config=config
-        self.store_path=Path(__file__).resolve().parents[1]/"data"/"custom_loops.json"
+        self.store_path=data_root()/"data"/"custom_loops.json"
         self.loops=list(config.get("pid_loops",[]) or [])+self._load_local_loops()
         if not self.loops:self.loops=[self._blank_loop()]
         self.current=dict(self.loops[0]); self.t0=time.monotonic(); self.t=deque(maxlen=3000)

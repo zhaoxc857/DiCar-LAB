@@ -11,13 +11,13 @@ from PySide6.QtWidgets import (
 )
 
 from core.wave_store import load_wave_csv, save_wave_csv
+from core.paths import data_root
 
 from datetime import datetime
-from pathlib import Path
 
 
 def waves_dir():
-    d = Path(__file__).resolve().parents[1] / "reports" / "waves"
+    d = data_root() / "reports" / "waves"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

@@ -1,8 +1,9 @@
 from pathlib import Path
 import yaml
 
-ROOT = Path(__file__).resolve().parents[1]
-VEHICLES = ROOT / "vehicles"
+from core.paths import resource_root
+
+VEHICLES = resource_root() / "vehicles"
 
 
 def _vehicle_order(path):
