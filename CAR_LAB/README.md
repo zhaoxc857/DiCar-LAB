@@ -19,7 +19,7 @@ python main.py
 
 ## Windows 桌面发布
 
-普通用户无需从本目录运行源码。请从 [GitHub Releases](https://github.com/zhaoxc857/DiCar-LAB/releases) 下载 `DiCAR-LAB-v1.8.2-Windows-x64-onefile.exe`（单文件版，双击即用）或 `DiCAR-LAB-v1.8.2-Windows-x64.zip`（便携 ZIP 版，完整解压后运行 `DiCAR LAB.exe`）。发布包通过根目录的 `build_portable_windows.bat` / `build_onefile_windows.ps1` 生成。
+普通用户无需从本目录运行源码。请从 [GitHub Releases](https://github.com/zhaoxc857/DiCar-LAB/releases) 下载 `DiCAR-LAB-v1.9.0-Windows-x64-onefile.exe`（单文件版，双击即用）或 `DiCAR-LAB-v1.9.0-Windows-x64.zip`（便携 ZIP 版，完整解压后运行 `DiCAR LAB.exe`）。发布包通过根目录的 `build_portable_windows.bat` / `build_onefile_windows.ps1` 生成。
 
 固件烧录页当前只实现可扩展的安全状态边界，运行按钮默认禁用；本版本不会执行任何烧录命令。
 
