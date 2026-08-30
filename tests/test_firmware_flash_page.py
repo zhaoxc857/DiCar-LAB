@@ -36,6 +36,35 @@ class FirmwareFlashPageTests(unittest.TestCase):
         self.assertEqual("固件烧录", pages[-1][0])
         self.assertIs(FirmwareFlashPage, pages[-1][2])
 
+    def test_flash_family_defaults_to_f1_and_guidance_matches(self):
+        page = FirmwareFlashPage(
+            {"vehicle": {"display_name": "STM32 巡线车"}}
+        )
+        self.assertEqual("STM32F1", page.family_combo.currentText())
+        self.assertIn("BOOT0", page.log.toPlainText())
+
+    def test_flash_family_follows_vehicle_profile(self):
+        page = FirmwareFlashPage(
+            {
+                "vehicle": {"display_name": "STM32F4 · 双电机智能车"},
+                "flash": {"family": "STM32F4"},
+            }
+        )
+        self.assertEqual("STM32F4", page.family_combo.currentText())
+        guidance = page.log.toPlainText()
+        self.assertIn("STM32F4", guidance)
+        self.assertIn("USART1", guidance)
+        self.assertIn("扇区擦除", guidance)
+
+    def test_unknown_flash_family_falls_back_to_f1(self):
+        page = FirmwareFlashPage(
+            {
+                "vehicle": {"display_name": "未知芯片车"},
+                "flash": {"family": "STM32H7"},
+            }
+        )
+        self.assertEqual("STM32F1", page.family_combo.currentText())
+
 
 if __name__ == "__main__":
     unittest.main()

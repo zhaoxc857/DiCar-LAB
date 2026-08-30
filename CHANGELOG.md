@@ -2,6 +2,13 @@
 
 本项目版本号遵循 `主.次.修订`。日期以功能整理为准。
 
+## v1.9.0 — 无线烧录拓展 STM32F4
+
+- 固件烧录页新增「芯片系列」选择（STM32F1 / STM32F4），默认跟随当前车型档案的 `flash.family` 标记，切换系列同步更换 bootloader 进入步骤与排障提示。
+- 新增车型档案 `stm32f4_dual_motor.yaml`（STM32F4 · 双电机智能车），并给 STM32F103 档案补充 `flash.family` 标记。
+- F4 与 F1 共用同一 AN3155 串口 bootloader 协议，stm32flash 命令不变；F4 指引明确 bootloader 以 USART1（PA9/PA10）为主接口（部分型号支持 USART3 等，以 AN2606 为准）、扇区擦除耗时更长、个别型号高波特率握手受限时可降 9600。**F4 目前为协议层面支持，尚未在实车端到端实测。**
+- 版本号提升至 v1.9.0。
+
 ## v1.8.2 — 版权归属与仓库更名
 
 - 项目版权变更为 tluda. 所有（MIT），依据 MIT 条款在 `THIRD-PARTY-NOTICES.md` 中保留 IKUN CAR LAB Contributors 的原始声明，并登记内置 stm32flash（GPL-2.0）组件。

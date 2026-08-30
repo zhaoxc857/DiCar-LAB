@@ -3,6 +3,9 @@ vehicle:
   display_name: STM32F103 · 8路巡线车
   type: STM32F103 / HC-05
   order: 10
+# 芯片系列标记：固件烧录页据此显示对应的 bootloader 进入步骤与擦除提示。
+flash:
+  family: STM32F1
 
 transport:
   type: serial

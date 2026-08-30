@@ -1,44 +1,86 @@
 param(
-    [switch]$Publish
+    [switch]$Publish,
+    [switch]$NoTag,
+    [string]$TagName = "v1.8.0",
+    [string]$CommitMessage = "release: DiCAR LAB v1.8.0 wireless flashing, threaded serial, scope capture",
+    [string]$BaseCommit = "bb755e3"
 )
 
 $ErrorActionPreference = "Stop"
+# Git outputs UTF-8; PowerShell 5.1 defaults to the ANSI code page (GBK on
+# zh-CN hosts), which mojibakes non-ASCII paths (e.g. README_小白用户.txt)
+# into the remote tree. Decode all native output as UTF-8.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 $owner = "zhaoxc857"
-$repo = "DiCar_Tune"
-$tagName = "v1.7.0"
-$apiRoot = "https://api.github.com/repos/$owner/$repo"
+$repo = "DiCar-LAB"
+$tagName = $TagName
+# Canonical API root: the repos/{owner}/{repo} endpoint 301-redirects here
+# (repository was renamed), and redirected requests drop the auth header.
+$apiRoot = "https://api.github.com/repositories/1336759699"
 
-function Invoke-GitHubApi {
+function Invoke-GitHubApiRaw {
     param(
-        [Parameter(Mandatory)] [ValidateSet("GET", "POST", "PATCH")] [string]$Method,
+        [Parameter(Mandatory)] [ValidateSet("GET", "POST", "PATCH", "PUT")] [string]$Method,
         [Parameter(Mandatory)] [string]$Uri,
         [object]$Body
     )
 
-    $parameters = @{
-        Method = $Method
-        Uri = $Uri
-        Headers = $script:headers
-        TimeoutSec = 30
+    # Windows PowerShell 5.1 Invoke-RestMethod intermittently sends requests
+    # without usable auth on this host, so the HTTP engine is curl, which is
+    # verified to work against api.github.com from this machine.
+    $hdrFile = [IO.Path]::GetTempFileName()
+    $outFile = [IO.Path]::GetTempFileName()
+    try {
+        [IO.File]::WriteAllText($hdrFile, @(
+            "Authorization: Bearer $script:token",
+            "Accept: application/vnd.github+json",
+            "X-GitHub-Api-Version: 2022-11-28",
+            "User-Agent: DiCAR-LAB-release"
+        ) -join "`n")
+
+        $curlArgs = @("-sS", "-X", $Method, "-H", "@$hdrFile", "-o", $outFile, "-w", "%{http_code}")
+        $bodyFile = $null
+        if ($null -ne $Body) {
+            $bodyFile = [IO.Path]::GetTempFileName()
+            [IO.File]::WriteAllText($bodyFile, ($Body | ConvertTo-Json -Depth 12 -Compress))
+            $curlArgs += @("-H", "Content-Type: application/json", "--data", "@$bodyFile")
+        }
+        $curlArgs += $Uri
+        $status = (& curl.exe @curlArgs) -join ""
+        if ($LASTEXITCODE -ne 0) {
+            throw "curl exited $LASTEXITCODE for $Method $Uri."
+        }
+        $raw = [IO.File]::ReadAllText($outFile)
+        return @{ status = $status; body = $raw }
+    } finally {
+        Remove-Item -LiteralPath $hdrFile -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $outFile -ErrorAction SilentlyContinue
+        if ($bodyFile) { Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue }
     }
-    if ($null -ne $Body) {
-        $parameters.ContentType = "application/json"
-        $parameters.Body = $Body | ConvertTo-Json -Depth 12 -Compress
+}
+
+function Invoke-GitHubApi {
+    param(
+        [Parameter(Mandatory)] [ValidateSet("GET", "POST", "PATCH", "PUT")] [string]$Method,
+        [Parameter(Mandatory)] [string]$Uri,
+        [object]$Body
+    )
+
+    $result = Invoke-GitHubApiRaw -Method $Method -Uri $Uri -Body $Body
+    if ($result.status -notin @("200", "201", "204")) {
+        throw "GitHub API $($result.status) for $Method ${Uri}: $($result.body)"
     }
-    Invoke-RestMethod @parameters
+    if ($result.status -eq "204" -or -not $result.body) {
+        return $null
+    }
+    return $result.body | ConvertFrom-Json
 }
 
 function Test-GitHubResource {
     param([Parameter(Mandatory)] [string]$Uri)
-    try {
-        Invoke-GitHubApi -Method GET -Uri $Uri | Out-Null
-        return $true
-    } catch {
-        if ($_.Exception.Response.StatusCode -eq 404) {
-            return $false
-        }
-        throw
-    }
+    $result = Invoke-GitHubApiRaw -Method GET -Uri $Uri
+    return ($result.status -eq "200")
 }
 
 function Get-GitBlobBytes {
@@ -46,9 +88,7 @@ function Get-GitBlobBytes {
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = (Get-Command git).Source
-    $startInfo.ArgumentList.Add("cat-file")
-    $startInfo.ArgumentList.Add("blob")
-    $startInfo.ArgumentList.Add($ObjectId)
+    $startInfo.Arguments = "cat-file blob $ObjectId"
     $startInfo.UseShellExecute = $false
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
@@ -76,26 +116,23 @@ if (-not $tokenLine) {
     throw "GitHub credential is unavailable in Git Credential Manager."
 }
 $token = $tokenLine.Substring("password=".Length)
+$script:token = $token
 $credentialLines = $null
-$script:headers = @{
-    Accept = "application/vnd.github+json"
-    Authorization = "Bearer $token"
-    "X-GitHub-Api-Version" = "2022-11-28"
-    "User-Agent" = "DiCAR-LAB-release"
-}
 
 try {
     $root = (git rev-parse --show-toplevel).Trim()
     $head = (git rev-parse HEAD).Trim()
-    $base = (git rev-parse origin/main).Trim()
+    $base = (git rev-parse $BaseCommit).Trim()
     $localTree = (git rev-parse "$head`^{tree}").Trim()
     $remoteRef = Invoke-GitHubApi -Method GET -Uri "$apiRoot/git/ref/heads/main"
     $remoteHead = $remoteRef.object.sha
 
-    if ($remoteHead -ne $base) {
-        throw "Remote main moved: expected $base, found $remoteHead."
+    $remoteTree = (Invoke-GitHubApi -Method GET -Uri "$apiRoot/git/commits/$remoteHead").tree.sha
+    $baseTree = (git rev-parse "$base`^{tree}").Trim()
+    if ($remoteTree -ne $baseTree) {
+        throw "Remote main tree $remoteTree does not match base $base tree $baseTree."
     }
-    if (Test-GitHubResource -Uri "$apiRoot/git/ref/tags/$tagName") {
+    if (-not $NoTag -and (Test-GitHubResource -Uri "$apiRoot/git/ref/tags/$tagName")) {
         throw "Remote tag $tagName already exists."
     }
 
@@ -181,33 +218,36 @@ try {
     $identity = @{ name = $name; email = $email; date = $date }
 
     $commit = Invoke-GitHubApi -Method POST -Uri "$apiRoot/git/commits" -Body @{
-        message = "release: replace desktop app with DiCAR LAB v1.7.0"
+        message = $CommitMessage
         tree = $tree.sha
         parents = @($remoteHead)
         author = $identity
         committer = $identity
     }
-    $tag = Invoke-GitHubApi -Method POST -Uri "$apiRoot/git/tags" -Body @{
-        tag = $tagName
-        message = "DiCAR LAB v1.7.0"
-        object = $commit.sha
-        type = "commit"
-        tagger = $identity
+    if (-not $NoTag) {
+        $tag = Invoke-GitHubApi -Method POST -Uri "$apiRoot/git/tags" -Body @{
+            tag = $tagName
+            message = "DiCAR LAB $tagName"
+            object = $commit.sha
+            type = "commit"
+            tagger = $identity
+        }
     }
 
     Invoke-GitHubApi -Method PATCH -Uri "$apiRoot/git/refs/heads/main" -Body @{
         sha = $commit.sha
         force = $false
     } | Out-Null
-    Invoke-GitHubApi -Method POST -Uri "$apiRoot/git/refs" -Body @{
-        ref = "refs/tags/$tagName"
-        sha = $tag.sha
-    } | Out-Null
+    if (-not $NoTag) {
+        Invoke-GitHubApi -Method POST -Uri "$apiRoot/git/refs" -Body @{
+            ref = "refs/tags/$tagName"
+            sha = $tag.sha
+        } | Out-Null
+        Write-Output "Published tag: $tagName"
+    }
 
     Write-Output "Published main commit: $($commit.sha)"
-    Write-Output "Published tag: $tagName"
     Write-Output "Repository: https://github.com/$owner/$repo"
 } finally {
-    $token = $null
-    $script:headers.Authorization = $null
+    $script:token = $null
 }

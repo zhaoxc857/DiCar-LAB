@@ -22,6 +22,35 @@ IDLE_MESSAGES = {
     FlashState.SUCCEEDED: "烧录成功",
 }
 
+# Per-family bootloader guidance. All STM32 families share the AN3155 USART
+# ROM bootloader (8E1, baud autodetect), so the stm32flash command is the
+# same; only the bootloader entry steps and erase behaviour differ.
+DEFAULT_FLASH_FAMILY = "STM32F1"
+FLASH_GUIDANCE = {
+    "STM32F1": (
+        "无线烧录步骤：\n"
+        "1. 点击上方「断开」，释放串口；\n"
+        "2. 车断电，BOOT0 跳线帽挪到 1，重新上电（OLED 熄灭属正常）；\n"
+        "3. 回到本页选择固件并点击「开始烧录」；\n"
+        "4. 烧录完成后断电，BOOT0 挪回 0，再上电即可运行新固件。\n"
+        "烧录期间车辆主控不运行，电机不会启动。"
+    ),
+    "STM32F4": (
+        "无线烧录步骤（STM32F4）：\n"
+        "1. 点击上方「断开」，释放串口；\n"
+        "2. 车断电，BOOT0 跳线帽接到 VDD，重新上电进入系统 bootloader；\n"
+        "   F4 bootloader 以 USART1（PA9/PA10）为主接口，部分型号还支持\n"
+        "   USART3（PB10/PB11）等，具体以 AN2606 对应型号的表格为准；\n"
+        "   蓝牙模块需保持 115200-8E1（与 F103 相同，已用 AT 持久化配置则无需重配）；\n"
+        "3. 回到本页选择固件并点击「开始烧录」；\n"
+        "4. F4 采用扇区擦除，大容量芯片的擦除加写入可能需要几分钟，\n"
+        "   属正常现象，请勿中途取消；\n"
+        "5. 烧录完成后断电，BOOT0 挪回 0，再上电即可运行新固件。\n"
+        "握手失败排查：确认 BOOT0 已接 VDD 且重新上电；个别型号 bootloader\n"
+        "对高波特率探测受限，可尝试把波特率降到 9600 后重试。"
+    ),
+}
+
 
 class FirmwareFlashPage(QWidget):
     """Single-shot wireless flashing over the HC-05 serial link.
@@ -64,6 +93,20 @@ class FirmwareFlashPage(QWidget):
             f"后端：{flash_backend}" if flash_backend else "后端状态：未检测到已验证的烧录器"
         )
         target_layout.addWidget(self.backend_label)
+        family_row = QHBoxLayout()
+        family_row.addWidget(QLabel("芯片系列"))
+        self.family_combo = QComboBox()
+        for item in FLASH_GUIDANCE:
+            self.family_combo.addItem(item)
+        default_family = str(config.get("flash", {}).get("family", DEFAULT_FLASH_FAMILY))
+        if default_family not in FLASH_GUIDANCE:
+            default_family = DEFAULT_FLASH_FAMILY
+        self.family_combo.setCurrentText(default_family)
+        self.family_combo.currentTextChanged.connect(self._update_guidance)
+        self.family_combo.setFixedWidth(120)
+        family_row.addWidget(self.family_combo)
+        family_row.addStretch(1)
+        target_layout.addLayout(family_row)
         port_row = QHBoxLayout()
         port_row.addWidget(QLabel("串口"))
         self.port_edit = QLineEdit(default_port)
@@ -121,14 +164,7 @@ class FirmwareFlashPage(QWidget):
 
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
-        self.log.setPlainText(
-            "无线烧录步骤：\n"
-            "1. 点击上方「断开」，释放串口；\n"
-            "2. 车断电，BOOT0 跳线帽挪到 1，重新上电（OLED 熄灭属正常）；\n"
-            "3. 回到本页选择固件并点击「开始烧录」；\n"
-            "4. 烧录完成后断电，BOOT0 挪回 0，再上电即可运行新固件。\n"
-            "烧录期间车辆主控不运行，电机不会启动。"
-        )
+        self.log.setPlainText(self._guidance_text())
         root.addWidget(self.log, 1)
 
         safety = QLabel(
@@ -144,6 +180,16 @@ class FirmwareFlashPage(QWidget):
             self.reason_label.setObjectName("statusGood")
             self.run_button.setEnabled(True)
         self.run_button.clicked.connect(self._start_flash)
+
+    def _guidance_text(self):
+        return FLASH_GUIDANCE.get(
+            self.family_combo.currentText(), FLASH_GUIDANCE[DEFAULT_FLASH_FAMILY]
+        )
+
+    def _update_guidance(self):
+        # Only reset the pane while idle so a running flash log is preserved.
+        if self.state.state == FlashState.IDLE:
+            self.log.setPlainText(self._guidance_text())
 
     def _choose_firmware(self):
         path, _ = QFileDialog.getOpenFileName(
