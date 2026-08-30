@@ -1,9 +1,10 @@
 
-from pathlib import Path
 import sys, importlib
 
-ROOT=Path(__file__).resolve().parents[1]
-LOG_DIR=ROOT/"logs"
+from core.paths import data_root, is_frozen, resource_root
+
+ROOT=resource_root()
+LOG_DIR=data_root()/"logs"
 LOG_DIR.mkdir(parents=True,exist_ok=True)
 
 def run_startup_checks():
@@ -15,11 +16,12 @@ def run_startup_checks():
             checks.append((mod,True,getattr(m,"__version__","installed")))
         except Exception as exc:
             checks.append((mod,False,str(exc)))
-    frozen=bool(getattr(sys,"frozen",False))
+    frozen=is_frozen()
     if not frozen:
         checks.append(("main.py",(ROOT/"main.py").exists(),""))
         checks.append(("requirements.txt",(ROOT/"requirements.txt").exists(),""))
     checks.append(("vehicles",(ROOT/"vehicles").exists(),""))
+    checks.append(("数据目录",True,str(data_root())))
     return checks
 
 def format_checks(checks):

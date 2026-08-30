@@ -1,9 +1,9 @@
-from pathlib import Path
 import sys
 import yaml
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QLineEdit,QPushButton,QComboBox,QPlainTextEdit,QMessageBox
-ROOT=Path(__file__).resolve().parents[1]
+from core.paths import data_root
+ROOT=data_root()
 
 class ProfileManager(QWidget):
     def __init__(self,bus,transport,config):

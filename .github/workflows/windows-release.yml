@@ -36,12 +36,17 @@ jobs:
         shell: pwsh
         run: .\build_portable_windows.ps1
 
+      - name: Build single-file Windows package
+        shell: pwsh
+        run: .\build_onefile_windows.ps1
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: DiCAR-LAB-Windows-portable
           path: |
             release/*.zip
+            release/*.exe
             release/SHA256SUMS-*.txt
           if-no-files-found: error
 
@@ -51,5 +56,6 @@ jobs:
         with:
           files: |
             release/*.zip
+            release/*.exe
             release/SHA256SUMS-*.txt
           generate_release_notes: true

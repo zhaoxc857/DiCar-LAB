@@ -5,8 +5,9 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
-ROOT = Path(__file__).resolve().parents[1]
-DB_PATH = ROOT / "data" / "car_lab_history.db"
+from core.paths import data_root
+
+DB_PATH = data_root() / "data" / "car_lab_history.db"
 
 
 class HistoryStore:
