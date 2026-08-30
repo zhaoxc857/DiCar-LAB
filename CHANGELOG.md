@@ -2,6 +2,13 @@
 
 本项目版本号遵循 `主.次.修订`。日期以功能整理为准。
 
+## v1.8.2 — 版权归属与仓库更名
+
+- 项目版权变更为 tluda. 所有（MIT），依据 MIT 条款在 `THIRD-PARTY-NOTICES.md` 中保留 IKUN CAR LAB Contributors 的原始声明，并登记内置 stm32flash（GPL-2.0）组件。
+- 仓库由 `zhaoxc857/DiCar_Tune` 更名为 `zhaoxc857/DiCar-LAB`，README、小白用户指南、贡献指南中的下载与 Issue 链接同步更新。
+- CI 发布流程改用规范 API 端点（修复仓库改名后发布脚本的 301/401 问题）；新增单文件版构建脚本 `build_onefile_windows.ps1` 与对应发布资产。
+- 版本号提升至 v1.8.2，发布资产携带新 LICENSE。
+
 ## v1.8.1 — 单文件版桌面 App
 
 - 新增单文件发行形态 `DiCAR-LAB-v1.8.1-Windows-x64-onefile.exe`：一个独立 exe 双击即用，无需解压文件夹（PyInstaller onefile，启动时自解压约 2~3 秒）；新增 `dicar_lab_onefile.spec` 与 `build_onefile_windows.ps1`。

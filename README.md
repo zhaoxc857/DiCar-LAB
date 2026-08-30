@@ -11,10 +11,10 @@
 
 ## 下载桌面版
 
-Windows 10/11 x64 用户可直接从 [GitHub Releases](https://github.com/zhaoxc857/DiCar_Tune/releases) 下载。桌面版已经包含 Python 与运行依赖，无需安装 Python、PySide6 或开发工具。两种形态任选其一：
+Windows 10/11 x64 用户可直接从 [GitHub Releases](https://github.com/zhaoxc857/DiCar-LAB/releases) 下载。桌面版已经包含 Python 与运行依赖，无需安装 Python、PySide6 或开发工具。两种形态任选其一：
 
-- **单文件版**（推荐）：下载 `DiCAR-LAB-v1.8.1-Windows-x64-onefile.exe`，它是一个独立的 exe，放到任意位置双击即用，无需解压。启动时程序会先自解压，首次窗口弹出约需 2~3 秒，属正常现象。
-- **便携文件夹版**：下载 `DiCAR-LAB-v1.8.1-Windows-x64.zip`，完整解压（不要直接在压缩包内运行）后双击其中的 `DiCAR LAB.exe`。
+- **单文件版**（推荐）：下载 `DiCAR-LAB-v1.8.2-Windows-x64-onefile.exe`，它是一个独立的 exe，放到任意位置双击即用，无需解压。启动时程序会先自解压，首次窗口弹出约需 2~3 秒，属正常现象。
+- **便携文件夹版**：下载 `DiCAR-LAB-v1.8.2-Windows-x64.zip`，完整解压（不要直接在压缩包内运行）后双击其中的 `DiCAR LAB.exe`。
 
 第一次使用先在顶部把「连接方式」选为「仿真」，再点「连接」。确认界面与示波器正常后，再连接真实车辆。
 
@@ -23,7 +23,7 @@ Windows 10/11 x64 用户可直接从 [GitHub Releases](https://github.com/zhaoxc
 可在 Release 页同时下载对应 `SHA256SUMS-*.txt`，在 PowerShell 中校验文件：
 
 ```powershell
-Get-FileHash .\DiCAR-LAB-v1.8.1-Windows-x64-onefile.exe -Algorithm SHA256
+Get-FileHash .\DiCAR-LAB-v1.8.2-Windows-x64-onefile.exe -Algorithm SHA256
 ```
 
 输出应与校验文件中对应记录一致。
@@ -105,10 +105,12 @@ python main.py
 ## 🗂️ 目录结构
 
 ```
-DiCar_Tune/
+DiCAR-LAB/
 ├── DiCAR_Launcher.py / .bat   # 图形化启动器（建虚拟环境 + 装依赖 + 启动）
-├── dicar_lab.spec             # Windows 桌面版冻结配置
+├── dicar_lab.spec             # Windows 便携 ZIP 冻结配置
+├── dicar_lab_onefile.spec     # Windows 单文件版冻结配置
 ├── build_portable_windows.bat # 生成便携 ZIP
+├── build_onefile_windows.ps1  # 生成单文件 exe
 ├── CAR_LAB/
 │   ├── main.py               # 程序入口
 │   ├── core/                 # 数据总线、协议、传输(串口/BLE/TCP/仿真)、配置、分析
@@ -117,6 +119,7 @@ DiCar_Tune/
 │   ├── docs/                 # 各版本说明与 MCU 通信协议手册
 │   └── requirements.txt
 ├── LICENSE
+├── THIRD-PARTY-NOTICES.md    # 第三方组件版权声明
 ├── CHANGELOG.md
 └── README.md
 ```
@@ -137,10 +140,10 @@ v1.8.0 已接入真实无线烧录：固件烧录页通过内置 stm32flash 与 
 # 运行测试
 .\CAR_LAB\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
-# 生成 release\DiCAR-LAB-v1.8.1-Windows-x64.zip
+# 生成 release\DiCAR-LAB-v1.8.2-Windows-x64.zip
 .\build_portable_windows.bat
 
-# 生成 release\DiCAR-LAB-v1.8.1-Windows-x64-onefile.exe（单文件版）
+# 生成 release\DiCAR-LAB-v1.8.2-Windows-x64-onefile.exe（单文件版）
 .\build_onefile_windows.ps1
 ```
 

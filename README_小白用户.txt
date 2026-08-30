@@ -2,7 +2,7 @@ DiCAR LAB · 小白用户速查卡
 （完整说明见仓库主页 README.md）
 
 怎么启动：
-  1) 打开 https://github.com/zhaoxc857/DiCar_Tune/releases
+  1) 打开 https://github.com/zhaoxc857/DiCar-LAB/releases
   2) 下载 DiCAR-LAB-v1.7.0-Windows-x64.zip
   3) 完整解压后双击 DiCAR LAB.exe
   桌面版已包含运行环境，不用安装 Python，也不用运行安装器。
@@ -19,7 +19,7 @@ DiCAR LAB · 小白用户速查卡
 
 启动失败怎么办：
   保留错误截图，并到项目 Issues 反馈：
-  https://github.com/zhaoxc857/DiCar_Tune/issues
+  https://github.com/zhaoxc857/DiCar-LAB/issues
 
 固件烧录：
   当前页面只是未来无限烧录的安全边界，运行按钮不会启用。
