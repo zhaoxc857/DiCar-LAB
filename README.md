@@ -13,8 +13,8 @@
 
 Windows 10/11 x64 用户可直接从 [GitHub Releases](https://github.com/zhaoxc857/DiCar-LAB/releases) 下载。桌面版已经包含 Python 与运行依赖，无需安装 Python、PySide6 或开发工具。两种形态任选其一：
 
-- **单文件版**（推荐）：下载 `DiCAR-LAB-v1.9.0-Windows-x64-onefile.exe`，它是一个独立的 exe，放到任意位置双击即用，无需解压。启动时程序会先自解压，首次窗口弹出约需 2~3 秒，属正常现象。
-- **便携文件夹版**：下载 `DiCAR-LAB-v1.9.0-Windows-x64.zip`，完整解压（不要直接在压缩包内运行）后双击其中的 `DiCAR LAB.exe`。
+- **单文件版**（推荐）：下载 `DiCAR-LAB-v1.10.0-Windows-x64-onefile.exe`，它是一个独立的 exe，放到任意位置双击即用，无需解压。启动时程序会先自解压，首次窗口弹出约需 2~3 秒，属正常现象。
+- **便携文件夹版**：下载 `DiCAR-LAB-v1.10.0-Windows-x64.zip`，完整解压（不要直接在压缩包内运行）后双击其中的 `DiCAR LAB.exe`。
 
 第一次使用先在顶部把「连接方式」选为「仿真」，再点「连接」。确认界面与示波器正常后，再连接真实车辆。
 
@@ -23,7 +23,7 @@ Windows 10/11 x64 用户可直接从 [GitHub Releases](https://github.com/zhaoxc
 可在 Release 页同时下载对应 `SHA256SUMS-*.txt`，在 PowerShell 中校验文件：
 
 ```powershell
-Get-FileHash .\DiCAR-LAB-v1.9.0-Windows-x64-onefile.exe -Algorithm SHA256
+Get-FileHash .\DiCAR-LAB-v1.10.0-Windows-x64-onefile.exe -Algorithm SHA256
 ```
 
 输出应与校验文件中对应记录一致。
@@ -142,10 +142,10 @@ v1.8.0 已接入真实无线烧录：固件烧录页通过内置 stm32flash 与 
 # 运行测试
 .\CAR_LAB\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
-# 生成 release\DiCAR-LAB-v1.9.0-Windows-x64.zip
+# 生成 release\DiCAR-LAB-v1.10.0-Windows-x64.zip
 .\build_portable_windows.bat
 
-# 生成 release\DiCAR-LAB-v1.9.0-Windows-x64-onefile.exe（单文件版）
+# 生成 release\DiCAR-LAB-v1.10.0-Windows-x64-onefile.exe（单文件版）
 .\build_onefile_windows.ps1
 ```
 
