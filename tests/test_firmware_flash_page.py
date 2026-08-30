@@ -65,6 +65,52 @@ class FirmwareFlashPageTests(unittest.TestCase):
         )
         self.assertEqual("STM32F1", page.family_combo.currentText())
 
+    def test_mspm0_family_locks_baud_and_enables_builtin_backend(self):
+        page = FirmwareFlashPage(
+            {
+                "vehicle": {"display_name": "TI MSPM0 双电机智能车"},
+                "flash": {"family": "MSPM0G3507"},
+            }
+        )
+        self.assertEqual("MSPM0G3507", page.family_combo.currentText())
+        self.assertEqual("9600", page.baud_combo.currentText())
+        self.assertFalse(page.baud_combo.isEnabled())
+        self.assertIn("未实板验证", page.log.toPlainText())
+        self.assertIn("PA10", page.log.toPlainText())
+        # The built-in BSL driver needs no external tool.
+        self.assertEqual("就绪", page.reason_label.text())
+        self.assertTrue(page.run_button.isEnabled())
+
+    def test_switching_back_to_stm32_without_backend_disables_run(self):
+        page = FirmwareFlashPage(
+            {
+                "vehicle": {"display_name": "TI MSPM0 双电机智能车"},
+                "flash": {"family": "MSPM0G3507"},
+            }
+        )
+        page.family_combo.setCurrentText("STM32F1")
+        self.assertEqual("烧录后端尚未配置", page.reason_label.text())
+        self.assertFalse(page.run_button.isEnabled())
+
+    def test_mspm0_rejects_oversize_firmware_before_touching_serial(self):
+        page = FirmwareFlashPage(
+            {
+                "vehicle": {"display_name": "TI MSPM0 双电机智能车"},
+                "flash": {"family": "MSPM0G3507"},
+            }
+        )
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as handle:
+            handle.write(b"\xff" * (128 * 1024 + 1))
+            oversized = handle.name
+        page.firmware_path.setText(oversized)
+        page.port_edit.setText("COM9")
+        page._start_flash()
+        self.assertIn("128KB", page.reason_label.text())
+        self.assertEqual(FlashState.IDLE, page.state.state)
+        self.assertIsNone(page.worker)
+
 
 if __name__ == "__main__":
     unittest.main()
