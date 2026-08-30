@@ -167,6 +167,6 @@ git push -u origin add-my-car
 
 ## 报告问题
 
-到 [Issues](https://github.com/zbk666/IKUN-CAR-LAB/issues) 提，附上：软件版本（`VERSION.txt`）、复现步骤、`logs/` 里的日志、必要时贴车型 YAML。
+到 [Issues](https://github.com/zhaoxc857/DiCar_Tune/issues) 提，附上：软件版本（`VERSION.txt`）、复现步骤、`logs/` 里的日志、必要时贴车型 YAML。
 
 感谢贡献 🚗💨
