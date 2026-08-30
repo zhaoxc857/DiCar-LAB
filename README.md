@@ -13,8 +13,8 @@
 
 Windows 10/11 x64 用户可直接从 [GitHub Releases](https://github.com/zhaoxc857/DiCar-LAB/releases) 下载。桌面版已经包含 Python 与运行依赖，无需安装 Python、PySide6 或开发工具。两种形态任选其一：
 
-- **单文件版**（推荐）：下载 `DiCAR-LAB-v1.9.0-Windows-x64-onefile.exe`，它是一个独立的 exe，放到任意位置双击即用，无需解压。启动时程序会先自解压，首次窗口弹出约需 2~3 秒，属正常现象。
-- **便携文件夹版**：下载 `DiCAR-LAB-v1.9.0-Windows-x64.zip`，完整解压（不要直接在压缩包内运行）后双击其中的 `DiCAR LAB.exe`。
+- **单文件版**（推荐）：下载 `DiCAR-LAB-v1.10.0-Windows-x64-onefile.exe`，它是一个独立的 exe，放到任意位置双击即用，无需解压。启动时程序会先自解压，首次窗口弹出约需 2~3 秒，属正常现象。
+- **便携文件夹版**：下载 `DiCAR-LAB-v1.10.0-Windows-x64.zip`，完整解压（不要直接在压缩包内运行）后双击其中的 `DiCAR LAB.exe`。
 
 第一次使用先在顶部把「连接方式」选为「仿真」，再点「连接」。确认界面与示波器正常后，再连接真实车辆。
 
@@ -23,7 +23,7 @@ Windows 10/11 x64 用户可直接从 [GitHub Releases](https://github.com/zhaoxc
 可在 Release 页同时下载对应 `SHA256SUMS-*.txt`，在 PowerShell 中校验文件：
 
 ```powershell
-Get-FileHash .\DiCAR-LAB-v1.9.0-Windows-x64-onefile.exe -Algorithm SHA256
+Get-FileHash .\DiCAR-LAB-v1.10.0-Windows-x64-onefile.exe -Algorithm SHA256
 ```
 
 输出应与校验文件中对应记录一致。
@@ -132,7 +132,7 @@ DiCAR-LAB/
 
 v1.8.0 已接入真实无线烧录：固件烧录页通过内置 stm32flash 与 HC-05 蓝牙串口直接烧录 STM32 固件（自动断开车辆连接、实时日志、失败诊断）。使用前将车辆 BOOT0 跳线帽置于 1 并断电重启，烧录完成后拨回 0。
 
-已支持芯片系列：**STM32F1**（实测：F103 + HC-05 循迹车）与 **STM32F4**（同一 AN3155 串口 bootloader 协议，烧录页可切换芯片系列；F4 bootloader 以 USART1 PA9/PA10 为主接口、采用扇区擦除，耗时更长，个别型号高波特率握手受限时可降为 9600）。F4 支持目前仅通过协议层面验证，尚未在实车完成端到端实测；其他 STM32 系列理论上可按同一后端扩展，欢迎提交车型档案与实测反馈。
+已支持芯片系列（按验证等级）：**STM32F1**（实车实测：F103 + HC-05 循迹车）、**STM32F4**（协议级支持，同一 AN3155 串口 bootloader，烧录页可切换芯片系列；F4 bootloader 以 USART1 PA9/PA10 为主接口、采用扇区擦除，耗时更长，个别型号高波特率握手受限时可降为 9600）、**TI MSPM0G3507**（软件已实现：内置 TI ROM BSL 驱动，按 SLAU887 走 9600-8N1、UART0 PA10/PA11，已通过协议仿真器的全流程测试，**未在实车验证**；蓝牙模块需配置为 9600-8N1（与 STM32 车不同），固件 ≤128KB，MSPM0G3519 为后续目标）。其他 STM32 系列理论上可按同一后端扩展，欢迎提交车型档案与实测反馈。
 
 后续无限烧录将通过可替换后端扩展，并保留每次烧录前校验、写后验证、可取消、可审计日志和失败即停等约束。启用真实烧录前仍需针对具体芯片、探针、供电与恢复流程单独验证。
 
@@ -142,10 +142,10 @@ v1.8.0 已接入真实无线烧录：固件烧录页通过内置 stm32flash 与 
 # 运行测试
 .\CAR_LAB\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
-# 生成 release\DiCAR-LAB-v1.9.0-Windows-x64.zip
+# 生成 release\DiCAR-LAB-v1.10.0-Windows-x64.zip
 .\build_portable_windows.bat
 
-# 生成 release\DiCAR-LAB-v1.9.0-Windows-x64-onefile.exe（单文件版）
+# 生成 release\DiCAR-LAB-v1.10.0-Windows-x64-onefile.exe（单文件版）
 .\build_onefile_windows.ps1
 ```
 

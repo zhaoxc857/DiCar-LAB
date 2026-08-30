@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, Qt
+from PySide6.QtCore import QProcess, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core import mspm0_bsl
 from core.flash_job import FlashJobState, FlashState
 
 IDLE_MESSAGES = {
@@ -22,9 +23,9 @@ IDLE_MESSAGES = {
     FlashState.SUCCEEDED: "烧录成功",
 }
 
-# Per-family bootloader guidance. All STM32 families share the AN3155 USART
-# ROM bootloader (8E1, baud autodetect), so the stm32flash command is the
-# same; only the bootloader entry steps and erase behaviour differ.
+# Per-family bootloader guidance. STM32 families share the AN3155 USART ROM
+# bootloader (8E1, baud autodetect) flashed via stm32flash; MSPM0 uses the
+# TI ROM BSL (9600 8N1 fixed) driven by the built-in core.mspm0_bsl driver.
 DEFAULT_FLASH_FAMILY = "STM32F1"
 FLASH_GUIDANCE = {
     "STM32F1": (
@@ -49,7 +50,89 @@ FLASH_GUIDANCE = {
         "握手失败排查：确认 BOOT0 已接 VDD 且重新上电；个别型号 bootloader\n"
         "对高波特率探测受限，可尝试把波特率降到 9600 后重试。"
     ),
+    "MSPM0G3507": (
+        "无线烧录步骤（TI MSPM0G3507，未实板验证）：\n"
+        "1. 点击上方「断开」，释放串口；\n"
+        "2. 让车辆进入 BSL：开发板按 BSL 键（BSL Invoke，默认 PA18 拉低）\n"
+        "   并复位；固件若实现了 PREPARE_FLASH 则可由上位机软触发（后续开放）；\n"
+        "   ROM BSL 固定走 UART0：PA10=BSL_RX、PA11=BSL_TX（SLAU887）；\n"
+        "3. 蓝牙模块必须配置为 9600-8N1（AT+UART=9600,0,0），\n"
+        "   注意与 STM32 车的 115200-8E1 不同；\n"
+        "4. 回到本页选择固件（.bin，≤128KB）并点击「开始烧录」；\n"
+        "   9600 波特率下 128KB 约需 3~5 分钟，请勿中途取消；\n"
+        "5. 烧录完成后应用自动启动，无需复位。\n"
+        "握手失败排查：确认已进 BSL（再按 BSL 键复位一次）、蓝牙为 9600-8N1、\n"
+        "接线为 PA10/PA11 交叉（RX↔TX）。"
+    ),
 }
+
+# Flash backend per chip family: stm32flash.exe subprocess vs the built-in
+# Python TI ROM BSL driver.
+MSPM0_FAMILY = "MSPM0G3507"
+STM32_FAMILIES = ("STM32F1", "STM32F4")
+
+
+class Mspm0FlashWorker(QThread):
+    log_line = Signal(str)
+    finished_with_code = Signal(int)
+
+    def __init__(self, port: str, firmware_path: str, parent=None):
+        super().__init__(parent)
+        self.port = port
+        self.firmware_path = firmware_path
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+    def run(self):
+        try:
+            image = Path(self.firmware_path).read_bytes()
+        except OSError as exc:
+            self.log_line.emit(f"读取固件失败：{exc}")
+            self.finished_with_code.emit(1)
+            return
+        if len(image) > mspm0_bsl.G3507_MAIN_FLASH_SIZE:
+            self.log_line.emit("固件超出 G3507 主闪存 128KB 上限。")
+            self.finished_with_code.emit(1)
+            return
+        try:
+            import serial
+
+            ser = serial.Serial(
+                self.port, 9600, bytesize=8, parity="N", stopbits=1, timeout=15
+            )
+        except Exception as exc:  # noqa: BLE001 - surface any open failure
+            self.log_line.emit(f"打开串口失败：{exc}")
+            self.finished_with_code.emit(1)
+            return
+        try:
+            mspm0_bsl.flash_image(
+                ser,
+                image,
+                should_continue=lambda: not self.cancelled,
+                progress=self._on_progress,
+                log=self.log_line.emit,
+            )
+            self.finished_with_code.emit(0)
+        except mspm0_bsl.BslError as exc:
+            if isinstance(exc, mspm0_bsl.BslCancelled):
+                self.log_line.emit("=== 已取消。===")
+            else:
+                self.log_line.emit(f"=== 烧录失败（{exc.kind}）：{exc.detail} ===")
+            self.finished_with_code.emit(1)
+        except Exception as exc:  # noqa: BLE001 - keep the GUI alive
+            self.log_line.emit(f"=== 烧录失败：{exc} ===")
+            self.finished_with_code.emit(1)
+        finally:
+            try:
+                ser.close()
+            except Exception:  # noqa: BLE001 - best effort cleanup
+                pass
+
+    def _on_progress(self, written: int, total: int):
+        if written == total:
+            self.log_line.emit(f"写入进度：{written}/{total} 字节（完成）")
 
 
 class FirmwareFlashPage(QWidget):
@@ -78,7 +161,8 @@ class FirmwareFlashPage(QWidget):
         root.setSpacing(12)
 
         intro = QLabel(
-            "通过 HC-05 蓝牙串口无线烧录 STM32 固件（stm32flash 后端）。"
+            "通过 HC-05 蓝牙串口无线烧录固件：STM32 走 stm32flash，"
+            "MSPM0 走内置 TI ROM BSL 驱动（未实板验证）。"
         )
         intro.setWordWrap(True)
         intro.setObjectName("muted")
@@ -102,7 +186,7 @@ class FirmwareFlashPage(QWidget):
         if default_family not in FLASH_GUIDANCE:
             default_family = DEFAULT_FLASH_FAMILY
         self.family_combo.setCurrentText(default_family)
-        self.family_combo.currentTextChanged.connect(self._update_guidance)
+        self.family_combo.currentTextChanged.connect(self._on_family_changed)
         self.family_combo.setFixedWidth(120)
         family_row.addWidget(self.family_combo)
         family_row.addStretch(1)
@@ -174,22 +258,38 @@ class FirmwareFlashPage(QWidget):
         safety.setObjectName("muted")
         root.addWidget(safety)
 
-        if flash_backend:
-            self.state = FlashJobState(FlashState.IDLE, "就绪")
-            self.reason_label.setText("就绪")
-            self.reason_label.setObjectName("statusGood")
-            self.run_button.setEnabled(True)
+        self.worker = None
+        self._on_family_changed()
         self.run_button.clicked.connect(self._start_flash)
+
+    def _backend_available(self):
+        if self.family_combo.currentText() == MSPM0_FAMILY:
+            return True
+        return bool(self.flash_backend)
 
     def _guidance_text(self):
         return FLASH_GUIDANCE.get(
             self.family_combo.currentText(), FLASH_GUIDANCE[DEFAULT_FLASH_FAMILY]
         )
 
-    def _update_guidance(self):
-        # Only reset the pane while idle so a running flash log is preserved.
+    def _on_family_changed(self):
+        is_mspm0 = self.family_combo.currentText() == MSPM0_FAMILY
+        # TI ROM BSL is fixed at 9600 8N1; lock the selector for MSPM0.
+        self.baud_combo.setCurrentText("9600")
+        self.baud_combo.setEnabled(not is_mspm0)
         if self.state.state == FlashState.IDLE:
             self.log.setPlainText(self._guidance_text())
+            if not self._backend_available():
+                # STM32 family selected but no stm32flash backend. Built
+                # directly - the state machine only models UNAVAILABLE ->
+                # IDLE, availability is a UI-level concern.
+                self.state = FlashJobState(FlashState.UNAVAILABLE, "烧录后端尚未配置")
+                self._set_reason("烧录后端尚未配置")
+                self.run_button.setEnabled(False)
+        elif self.state.state == FlashState.UNAVAILABLE and self._backend_available():
+            self.state = FlashJobState(FlashState.IDLE, "就绪")
+            self._set_reason("就绪", good=True)
+            self.run_button.setEnabled(True)
 
     def _choose_firmware(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -242,11 +342,19 @@ class FirmwareFlashPage(QWidget):
         if not firmware or not Path(firmware).is_file():
             self._reject("固件文件不存在，请重新选择")
             return
+        if self.family_combo.currentText() == MSPM0_FAMILY:
+            size = Path(firmware).stat().st_size
+            if size > mspm0_bsl.G3507_MAIN_FLASH_SIZE:
+                self._reject("固件超出 G3507 主闪存 128KB 上限，无法烧录")
+                return
         self.state = self.state.transition(FlashState.VALIDATING, "校验烧录条件…")
         self._set_reason("校验烧录条件…")
         if self.transport is not None and self.transport.connected:
             self.transport.disconnect()
             self.log.appendPlainText("已自动断开车辆连接，释放串口。")
+        if self.family_combo.currentText() == MSPM0_FAMILY:
+            self._start_mspm0_worker(port, firmware)
+            return
         self.state = self.state.transition(FlashState.FLASHING, "正在烧录…")
         self._set_reason("正在烧录…")
         command = build_command(self.flash_backend, port, int(self.baud_combo.currentText()), firmware)
@@ -256,10 +364,40 @@ class FirmwareFlashPage(QWidget):
         self.process.finished.connect(self._on_finished)
         self.process.start(command[0], command[1:])
 
+    def _start_mspm0_worker(self, port, firmware):
+        self.state = self.state.transition(FlashState.FLASHING, "正在烧录…")
+        self._set_reason("正在烧录…")
+        self.log.appendPlainText(f"以 9600-8N1 连接 {port}，使用内置 TI ROM BSL 驱动。")
+        self.worker = Mspm0FlashWorker(port, firmware, self)
+        self.worker.log_line.connect(self.log.appendPlainText)
+        self.worker.finished_with_code.connect(self._on_mspm0_finished)
+        self.worker.start()
+
     def _cancel_flash(self):
-        if self.process is not None and self.state.state == FlashState.FLASHING:
+        if self.state.state != FlashState.FLASHING:
+            return
+        if self.worker is not None:
+            self.worker.cancel()
+            self._set_reason("正在取消…")
+        elif self.process is not None:
             self.process.kill()
             self._set_reason("正在取消…")
+
+    def _on_mspm0_finished(self, code):
+        self.worker = None
+        if code == 0:
+            self.state = self.state.transition(FlashState.VERIFYING, "写入完成，回读校验通过")
+            self.state = self.state.transition(FlashState.SUCCEEDED, "烧录成功")
+            self._set_reason("烧录成功", good=True)
+            self.log.appendPlainText("=== 烧录成功，应用已由 BSL 启动。 ===")
+        else:
+            self.state = self.state.transition(FlashState.FAILED, "烧录失败，详见日志")
+            self._set_reason("烧录失败，详见日志")
+            self.log.appendPlainText(
+                "=== 烧录失败。确认车辆已进 BSL、蓝牙为 9600-8N1、PA10/PA11 接线正确后重试。 ==="
+            )
+        self.state = self.state.transition(FlashState.IDLE)
+        self._refresh_action_buttons()
 
     def _on_output(self):
         if self.process is None:
@@ -291,7 +429,9 @@ class FirmwareFlashPage(QWidget):
             FlashState.FLASHING,
             FlashState.VERIFYING,
         )
-        self.run_button.setEnabled(not active)
+        self.run_button.setEnabled(
+            not active and self.state.state != FlashState.UNAVAILABLE
+        )
         self.cancel_button.setEnabled(self.state.state == FlashState.FLASHING)
 
 

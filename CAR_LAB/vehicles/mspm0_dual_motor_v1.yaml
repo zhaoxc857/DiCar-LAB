@@ -3,10 +3,14 @@ vehicle:
   display_name: TI MSPM0 双电机智能车
   type: 双轮差速 / UART
   order: 30
+# 芯片系列标记：固件烧录页据此选择内置 TI ROM BSL 驱动（未实板验证）。
+flash:
+  family: MSPM0G3507
 transport:
   type: serial
   port: COM3
-  baudrate: 115200
+  # ROM BSL 固定 9600-8N1，蓝牙模块按此配置，应用链路保持一致。
+  baudrate: 9600
 ble:
   write_uuid: ''
   notify_uuid: ''
