@@ -152,4 +152,6 @@ GitHub Actions 会在 pull request 与 main 分支更新时执行测试和 Windo
 
 ## 📄 许可证
 
-本项目采用 [MIT License](LICENSE) 开源。你可以自由使用、修改、分发与商用，仅需保留版权与许可声明。
+## 📄 许可证
+
+本项目采用 [MIT License](LICENSE) 开源，版权归 tluda. 所有。你可以自由使用、修改、分发与商用，仅需保留版权与许可声明。项目包含的第三方组件（IKUN CAR LAB 原始代码、stm32flash 工具）及其许可证见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
