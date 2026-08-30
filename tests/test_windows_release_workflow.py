@@ -18,6 +18,7 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(workflow["permissions"]["contents"], "write")
         self.assertIn("python -m unittest discover -s tests -v", source)
         self.assertIn("build_portable_windows.ps1", source)
+        self.assertIn("build_onefile_windows.ps1", source)
         self.assertIn("actions/upload-artifact@v4", source)
         self.assertIn("softprops/action-gh-release@v2", source)
 
