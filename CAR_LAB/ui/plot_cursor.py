@@ -1,10 +1,24 @@
 from bisect import bisect_left
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
+
+import ui.theme as theme
+
+
+def _theme_color(name, alpha=None):
+    color = QColor(theme.tokens(theme.current_theme)[name])
+    if alpha is not None:
+        color.setAlpha(int(alpha))
+    return color
 
 
 class CurveInspector:
-    """Reusable oscilloscope cursor: hover snap + A/B measurement."""
+    """Reusable oscilloscope cursor: hover snap + A/B measurement.
+
+    Colors come from the active theme tokens (hover=focus, A=warn,
+    B=focus-2…), so dark/light themes both get readable overlays.
+    """
 
     def __init__(self, plot_widget, data_provider, on_hover=None, on_ab=None, show_overlay=True):
         self.plot = plot_widget
@@ -13,16 +27,21 @@ class CurveInspector:
         self.on_ab = on_ab
         self.show_overlay = show_overlay
 
-        pen_hover = pg.mkPen((116, 192, 252, 190), width=1)
+        pen_hover = pg.mkPen(_theme_color("focus", 190), width=1)
         self.hover_v = pg.InfiniteLine(angle=90, movable=False, pen=pen_hover)
-        self.hover_h = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen((116, 192, 252, 90), width=1))
+        self.hover_h = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen(_theme_color("focus", 90), width=1))
         self.hover_v.setZValue(1000)
         self.hover_h.setZValue(1000)
         self.plot.addItem(self.hover_v, ignoreBounds=True)
         self.plot.addItem(self.hover_h, ignoreBounds=True)
         self.hover_v.hide(); self.hover_h.hide()
 
-        self.text = pg.TextItem(anchor=(0, 1), fill=pg.mkBrush(18, 24, 33, 225), border=pg.mkPen(70, 86, 105))
+        self.text = pg.TextItem(
+            anchor=(0, 1),
+            fill=pg.mkBrush(_theme_color("surface2", 235)),
+            border=pg.mkPen(_theme_color("border_strong")),
+        )
+        self.text.setColor(_theme_color("text"))
         self.text.setZValue(1001)
         # Overlay items must never participate in PlotItem auto-range.
         # Otherwise moving the mouse can make pyqtgraph recalculate the view
@@ -30,8 +49,8 @@ class CurveInspector:
         self.plot.addItem(self.text, ignoreBounds=True)
         self.text.hide()
 
-        self.a_line = pg.InfiniteLine(angle=90, movable=False, label="A", pen=pg.mkPen((255, 202, 58), width=2))
-        self.b_line = pg.InfiniteLine(angle=90, movable=False, label="B", pen=pg.mkPen((255, 121, 198), width=2))
+        self.a_line = pg.InfiniteLine(angle=90, movable=False, label="A", pen=pg.mkPen(_theme_color("warn"), width=2))
+        self.b_line = pg.InfiniteLine(angle=90, movable=False, label="B", pen=pg.mkPen(_theme_color("danger"), width=2))
         self.a_line.setZValue(999); self.b_line.setZValue(999)
         self.plot.addItem(self.a_line, ignoreBounds=True); self.plot.addItem(self.b_line, ignoreBounds=True)
         self.a_line.hide(); self.b_line.hide()

@@ -3,6 +3,7 @@ from collections import deque
 import json, logging, time
 from core.paths import data_root
 import pyqtgraph as pg
+import ui.theme as theme
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QWidget,QHBoxLayout,QVBoxLayout,QGridLayout,QGroupBox,QLabel,QPushButton,
@@ -92,7 +93,7 @@ class CustomLoopLab(QWidget):
         target_box=QGroupBox("目标 / 在线 PID")
         tg=QGridLayout(target_box)
         self.target=QDoubleSpinBox(); self.target.setRange(-1e9,1e9); self.target.setDecimals(4)
-        send=QPushButton("发送目标"); send.clicked.connect(self._send_target)
+        send=QPushButton("发送目标"); send.setObjectName("primary"); send.clicked.connect(self._send_target)
         self.step=QComboBox(); self.step.addItems(["0.001","0.01","0.1","1","10"]); self.step.setCurrentText("0.01")
         self.auto=QCheckBox("修改后立即 SET"); self.auto.setChecked(True)
         tg.addWidget(QLabel("目标"),0,0); tg.addWidget(self.target,0,1); tg.addWidget(send,0,2)
@@ -129,9 +130,9 @@ class CustomLoopLab(QWidget):
 
         right=QVBoxLayout()
         self.p1=pg.PlotWidget(title="自定义环：目标 / 反馈 / 误差"); self.p1.showGrid(x=True,y=True,alpha=.18)
-        self.c_t=self.p1.plot(name="目标",pen=pg.mkPen((45,108,210),width=2)); self.c_f=self.p1.plot(name="反馈",pen=pg.mkPen((220,135,40),width=2)); self.c_e=self.p1.plot(name="误差",pen=pg.mkPen((190,65,75),width=2))
+        self.c_t=self.p1.plot(name="目标",pen=theme.plot_pen(0)); self.c_f=self.p1.plot(name="反馈",pen=theme.plot_pen(1)); self.c_e=self.p1.plot(name="误差",pen=theme.plot_pen(2))
         self.p2=pg.PlotWidget(title="自定义环：输出"); self.p2.showGrid(x=True,y=True,alpha=.18)
-        self.c_o=self.p2.plot(name="输出",pen=pg.mkPen((40,155,100),width=2))
+        self.c_o=self.p2.plot(name="输出",pen=theme.plot_pen(3))
         right.addWidget(self.p1,1); right.addWidget(self.p2,1); root.addLayout(right,1)
         self._toggle_expert(0)
 

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from core.wave_store import load_wave_csv, save_wave_csv
 from core.scope_math import DERIVED_CHANNELS, DERIVED_PRESET, derive_channels
 from core.paths import data_root
+import ui.theme as theme
 
 from datetime import datetime
 
@@ -128,7 +129,7 @@ class ScopePage(QWidget):
         self.replay_mode=False; self._replay_title="实时示波器"
         self.cursor_a=None; self.cursor_b=None; self.overlay_lines=[]
         # 持久曲线：每个通道一个 PlotDataItem，只更新数据而不是每帧重建，多通道下更省 CPU。
-        self._palette=[(45,108,210),(220,135,40),(190,65,75),(40,155,100),(125,80,180),(40,155,165)]
+        # 颜色从主题令牌取（_color_for），深浅主题各有一套曲线色板。
         self._curves={}; self._color_idx={}; self._next_color=0
         root=QVBoxLayout(self); root.setContentsMargins(8,8,8,8); root.setSpacing(8)
 
@@ -327,8 +328,8 @@ class ScopePage(QWidget):
 
     def _color_for(self,k):
         if k not in self._color_idx:
-            self._color_idx[k]=self._next_color%len(self._palette); self._next_color+=1
-        return self._palette[self._color_idx[k]]
+            self._color_idx[k]=self._next_color%8; self._next_color+=1
+        return theme.plot_color(self._color_idx[k])
 
     def _draw(self):
         if self.freeze:return
@@ -370,9 +371,10 @@ class ScopePage(QWidget):
 
     def _draw_cursors(self):
         self._remove_overlays()
-        for x,color in ((self.cursor_a,(60,100,180)),(self.cursor_b,(190,80,80))):
+        t = theme.tokens(theme.current_theme)
+        for x, key in ((self.cursor_a, "focus"), (self.cursor_b, "danger")):
             if x is not None:
-                line=pg.InfiniteLine(pos=x,angle=90,movable=False,pen=pg.mkPen(color,width=1))
+                line=pg.InfiniteLine(pos=x,angle=90,movable=False,pen=pg.mkPen(t[key],width=1))
                 self.plot.addItem(line,ignoreBounds=True); self.overlay_lines.append(line)
 
     def _nearest_index(self,seq,target):

@@ -4,6 +4,7 @@ import time, statistics
 import pyqtgraph as pg
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QWidget,QHBoxLayout,QVBoxLayout,QGridLayout,QGroupBox,QLabel,QPushButton,QDoubleSpinBox,QComboBox,QCheckBox,QPlainTextEdit,QFrame
+import ui.theme as theme
 
 class SpeedLab(QWidget):
     def __init__(self,bus,transport,config):
@@ -15,7 +16,7 @@ class SpeedLab(QWidget):
         left=QVBoxLayout()
         g=QGroupBox("速度目标"); grid=QGridLayout(g)
         self.target=QDoubleSpinBox(); self.target.setRange(-10000,10000); self.target.setDecimals(1); self.target.setValue(500)
-        b=QPushButton("发送目标 RPM"); b.clicked.connect(lambda:self.transport.command(self.cfg.get("target_command_key","target_rpm"),self.target.value()))
+        b=QPushButton("发送目标 RPM"); b.setObjectName("primary"); b.clicked.connect(lambda:self.transport.command(self.cfg.get("target_command_key","target_rpm"),self.target.value()))
         grid.addWidget(QLabel("目标 RPM"),0,0); grid.addWidget(self.target,0,1); grid.addWidget(b,1,0,1,2); left.addWidget(g)
         pgp=QGroupBox("在线 PID · 改完立即生效"); pid_grid=QGridLayout(pgp)
         self.step=QComboBox(); self.step.addItems(["0.001","0.01","0.1","1"]); self.step.setCurrentText("0.01"); self.step.currentTextChanged.connect(self._step)
@@ -38,8 +39,8 @@ class SpeedLab(QWidget):
         root.addLayout(left,0)
 
         right=QVBoxLayout()
-        self.p1=pg.PlotWidget(title="速度跟踪 · 目标 / 实际"); self.p1.showGrid(x=True,y=True,alpha=.18); self.p1.addLegend(); self.c_target=self.p1.plot(name="目标",pen=pg.mkPen((40,100,210),width=2)); self.c_actual=self.p1.plot(name="实际",pen=pg.mkPen((220,130,40),width=2))
-        self.p2=pg.PlotWidget(title="误差（局部自动放大）"); self.p2.showGrid(x=True,y=True,alpha=.18); self.c_error=self.p2.plot(name="Error",pen=pg.mkPen((200,70,70),width=2))
+        self.p1=pg.PlotWidget(title="速度跟踪 · 目标 / 实际"); self.p1.showGrid(x=True,y=True,alpha=.18); self.p1.addLegend(); self.c_target=self.p1.plot(name="目标",pen=theme.plot_pen(0)); self.c_actual=self.p1.plot(name="实际",pen=theme.plot_pen(1))
+        self.p2=pg.PlotWidget(title="误差（局部自动放大）"); self.p2.showGrid(x=True,y=True,alpha=.18); self.c_error=self.p2.plot(name="Error",pen=theme.plot_pen(2))
         right.addWidget(self.p1,1); right.addWidget(self.p2,1); root.addLayout(right,1)
 
         bus.telemetry.connect(self._tel); bus.ack.connect(self._ack); bus.parameter_sync.connect(self._sync)

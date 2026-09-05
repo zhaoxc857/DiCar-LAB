@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
 
 from core.corner_analyzer import CornerAnalyzer
 from core.track_map import TrackMapIntegrator
+from ui.widgets import ValueCard
+import ui.theme as theme
 
 
 class TrackLab(QWidget):
@@ -30,7 +32,7 @@ class TrackLab(QWidget):
             yaw_rate_key=self.cfg.get("yaw_rate_key", "gyro_z"),
         )
         self.map_paths = [[]]
-        self.map_colors = [(45, 108, 210), (220, 135, 40), (190, 65, 75), (40, 155, 100), (125, 80, 180)]
+        self.map_colors = None  # 由 theme.plot_color 按圈取色
         self._map_curves = []
 
         corner_cfg = dict(self.cfg.get("corner_analysis", {}) or {})
@@ -137,32 +139,21 @@ class TrackLab(QWidget):
         return group
 
     def _count_card(self, title):
-        frame = QFrame()
-        frame.setObjectName("card")
-        lay = QVBoxLayout(frame)
-        lay.setContentsMargins(12, 7, 12, 7)
-        title_label = QLabel(title)
-        title_label.setObjectName("muted")
-        value = QLabel("0")
-        value.setStyleSheet("font-size:22px;font-weight:800;")
-        lay.addWidget(title_label)
-        lay.addWidget(value)
-        return frame, value
+        return ValueCard(title)
 
     def _build_count_cards(self):
         row = QHBoxLayout()
-        c, self.enter_count_label = self._count_card("入弯次数")
-        row.addWidget(c)
-        c, self.exit_count_label = self._count_card("出弯次数")
-        row.addWidget(c)
-        c, self.left_count_label = self._count_card("左弯")
-        row.addWidget(c)
-        c, self.right_count_label = self._count_card("右弯")
-        row.addWidget(c)
-        c, self.current_corner_label = self._count_card("当前状态")
-        self.current_corner_label.setText("直线")
-        self.current_corner_label.setStyleSheet("font-size:18px;font-weight:800;")
-        row.addWidget(c)
+        self.enter_count_label = self._count_card("入弯次数")
+        row.addWidget(self.enter_count_label)
+        self.exit_count_label = self._count_card("出弯次数")
+        row.addWidget(self.exit_count_label)
+        self.left_count_label = self._count_card("左弯")
+        row.addWidget(self.left_count_label)
+        self.right_count_label = self._count_card("右弯")
+        row.addWidget(self.right_count_label)
+        self.current_corner_label = self._count_card("当前状态")
+        self.current_corner_label.val.setText("直线")
+        row.addWidget(self.current_corner_label)
         row.addStretch(1)
         return row
 
@@ -217,7 +208,7 @@ class TrackLab(QWidget):
                 continue
             xs = [p[0] for p in path]
             ys = [p[1] for p in path]
-            color = self.map_colors[i % len(self.map_colors)]
+            color = theme.plot_color(i)
             curve = self.map_plot.plot(
                 xs, ys, pen=pg.mkPen(color, width=2),
                 name=f"圈 {i + 1}")
@@ -425,15 +416,15 @@ class TrackLab(QWidget):
 
     def _refresh_counts(self):
         counts = self.corner.counts()
-        self.enter_count_label.setText(str(counts["enter"]))
-        self.exit_count_label.setText(str(counts["exit"]))
-        self.left_count_label.setText(str(counts["left"]))
-        self.right_count_label.setText(str(counts["right"]))
+        self.enter_count_label.val.setText(str(counts["enter"]))
+        self.exit_count_label.val.setText(str(counts["exit"]))
+        self.left_count_label.val.setText(str(counts["left"]))
+        self.right_count_label.val.setText(str(counts["right"]))
         active = self.corner.active_corner()
         if active:
-            self.current_corner_label.setText(active.get("direction", "弯中"))
+            self.current_corner_label.val.setText(active.get("direction", "弯中"))
         else:
-            self.current_corner_label.setText("直线")
+            self.current_corner_label.val.setText("直线")
 
     def _tel(self, data):
         if not self.running:

@@ -10,7 +10,7 @@ log=logging.getLogger(__name__)
 class ProfileManager(QWidget):
     def __init__(self,bus,transport,config):
         super().__init__();self.transport=transport;self.config=config;self.params=config.get("parameters",[]);self.values={};vid=config.get("vehicle",{}).get("id","default");self.dir=ROOT/"profiles"/str(vid);self.dir.mkdir(parents=True,exist_ok=True)
-        root=QVBoxLayout(self);row=QHBoxLayout();self.name=QLineEdit("stable");self.combo=QComboBox();read=QPushButton("读取全部参数");save=QPushButton("保存当前方案");load=QPushButton("加载并下发");card=QPushButton("导出调参卡片");read.clicked.connect(self._read_all);row.addWidget(self.name);row.addWidget(read);row.addWidget(save);row.addWidget(self.combo);row.addWidget(load);row.addWidget(card);root.addLayout(row)
+        root=QVBoxLayout(self);row=QHBoxLayout();self.name=QLineEdit("stable");self.combo=QComboBox();read=QPushButton("读取全部参数");save=QPushButton("保存当前方案");load=QPushButton("加载并下发");load.setObjectName("primary");card=QPushButton("导出调参卡片");read.clicked.connect(self._read_all);row.addWidget(self.name);row.addWidget(read);row.addWidget(save);row.addWidget(self.combo);row.addWidget(load);row.addWidget(card);root.addLayout(row)
         self.preview=QPlainTextEdit();self.preview.setReadOnly(True);root.addWidget(self.preview);save.clicked.connect(self._save);load.clicked.connect(self._load);card.clicked.connect(self._export_card);self.combo.currentTextChanged.connect(self._preview);bus.ack.connect(self._ack);self._refresh()
     def _ack(self,k,v):self.values[str(k)]=v
     def _read_all(self):

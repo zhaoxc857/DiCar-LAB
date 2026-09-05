@@ -41,7 +41,7 @@ class MissionsPage(QWidget):
             best = int(self.settings.value(f"missions/best/{mission['key']}", 0) or 0)
             stars = "★" * best + "☆" * (2 - best)
             title = QLabel(f"{mission['title']}  {stars}")
-            title.setStyleSheet("font-weight:700")
+            title.setObjectName("panelTitle")
             brief = QLabel(mission["brief"])
             brief.setObjectName("muted")
             brief.setWordWrap(True)

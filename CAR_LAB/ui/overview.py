@@ -1,20 +1,7 @@
-from PySide6.QtWidgets import QWidget, QGridLayout, QVBoxLayout, QLabel, QFrame
+from PySide6.QtWidgets import QWidget, QGridLayout
 
 from core.fw_version import FwVersionProbe
-
-
-class ValueCard(QFrame):
-    def __init__(self, title, unit=""):
-        super().__init__(); self.setObjectName("card")
-        lay = QVBoxLayout(self)
-        t = QLabel(title); t.setStyleSheet("color:#9fb0c3")
-        self.val = QLabel("--")
-        self.val.setStyleSheet("font-size:30px;font-weight:700")
-        self.unit = unit
-        lay.addWidget(t); lay.addWidget(self.val)
-    def set_value(self, value):
-        try: self.val.setText(f"{float(value):.2f} {self.unit}")
-        except Exception: self.val.setText(str(value))
+from ui.widgets import ValueCard
 
 
 class OverviewPage(QWidget):

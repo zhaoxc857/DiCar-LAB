@@ -4,6 +4,7 @@ from pathlib import Path
 import pyqtgraph as pg
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QTableWidget,QTableWidgetItem,QPushButton,QPlainTextEdit,QFileDialog,QMessageBox,QAbstractItemView
 from core.history_store import HistoryStore
+import ui.theme as theme
 
 
 class ExperimentHistoryPage(QWidget):
@@ -27,8 +28,8 @@ class ExperimentHistoryPage(QWidget):
         s=d.get("samples",[]) or []
         if s and "t" in s[0]:
             x=[float(z.get("t",i)) for i,z in enumerate(s)]
-            for k in ("target","actual","output"):
-                if any(k in z for z in s):self.plot.plot(x,[float(z.get(k,0)) for z in s],name=k)
+            for pen_idx,k in enumerate(("target","actual","output")):
+                if any(k in z for z in s):self.plot.plot(x,[float(z.get(k,0)) for z in s],name=k,pen=theme.plot_pen(pen_idx))
     def _export(self):
         if not self.current_id:return
         d=self.store.get(self.current_id);s=d.get("samples",[]) if d else []

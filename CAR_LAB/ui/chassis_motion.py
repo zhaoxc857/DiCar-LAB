@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QPushButton, QDoubleSpinBox, QComboBox,
 )
 
-_PALETTE = [(45, 108, 210), (220, 135, 40), (190, 65, 75)]
+import ui.theme as theme
 
 
 class ChassisMotionPage(QWidget):
@@ -66,7 +66,7 @@ class ChassisMotionPage(QWidget):
             g = QGridLayout(box)
             # 目标 / 实际 数值读出
             tl = QLabel("目标 --"); al = QLabel("实际 --")
-            tl.setStyleSheet("font-weight:700")
+            tl.setObjectName("panelTitle")
             g.addWidget(tl, 0, 0); g.addWidget(al, 0, 1, 1, 2)
             self.readouts[key] = (tl, al, unit)
             # 目标发送
@@ -95,7 +95,7 @@ class ChassisMotionPage(QWidget):
             plot = pg.PlotWidget(title=f"{label}：目标 / 实际")
             plot.showGrid(x=True, y=True, alpha=.18)
             plot.addLegend()
-            color = _PALETTE[idx % len(_PALETTE)]
+            color = theme.plot_color(idx)
             ct = plot.plot(name="目标", pen=pg.mkPen(color, width=2, style=pg.QtCore.Qt.PenStyle.DashLine))
             ca = plot.plot(name="实际", pen=pg.mkPen(color, width=2))
             self.curves[key] = {"target": ct, "actual": ca}

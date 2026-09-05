@@ -13,7 +13,7 @@ class ParametersPage(QWidget):
             self.table.setItem(r,2,QTableWidgetItem(str(p.get("default",0))))
             self.table.setItem(r,3,QTableWidgetItem("待命"))
         root.addWidget(self.table)
-        row=QHBoxLayout(); read=QPushButton("读取全部"); send=QPushButton("下发选中行")
+        row=QHBoxLayout(); read=QPushButton("读取全部"); send=QPushButton("下发选中行"); send.setObjectName("primary")
         read.clicked.connect(self._read_all); send.clicked.connect(self._send_selected)
         row.addWidget(read); row.addWidget(send); row.addStretch(); root.addLayout(row)
         bus.ack.connect(self._ack_legacy); bus.parameter_sync.connect(self._sync)

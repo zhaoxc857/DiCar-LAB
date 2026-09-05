@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 from core.angle import angle_error_deg
 from ui.plot_cursor import CurveInspector
+import ui.theme as theme
 
 
 class HeadingLab(QWidget):
@@ -21,7 +22,7 @@ class HeadingLab(QWidget):
         target_box=QGroupBox("航向目标 / 角度阶跃")
         tg=QGridLayout(target_box)
         self.target=QDoubleSpinBox(); self.target.setRange(-180,180); self.target.setDecimals(1); self.target.setValue(30)
-        send=QPushButton("发送目标航向"); send.clicked.connect(lambda:self.transport.command(self.cfg.get("target_command_key","target_yaw"),self.target.value()))
+        send=QPushButton("发送目标航向"); send.setObjectName("primary"); send.clicked.connect(lambda:self.transport.command(self.cfg.get("target_command_key","target_yaw"),self.target.value()))
         zero=QPushButton("回到 0°"); zero.clicked.connect(lambda:self.transport.command(self.cfg.get("target_command_key","target_yaw"),0.0))
         tg.addWidget(QLabel("目标航向角"),0,0); tg.addWidget(self.target,0,1); tg.addWidget(send,1,0); tg.addWidget(zero,1,1)
         left.addWidget(target_box)
@@ -47,10 +48,10 @@ class HeadingLab(QWidget):
         right=QVBoxLayout()
         self.p_yaw=pg.PlotWidget(title="航向外环：目标航向 / 实际航向 / 误差")
         self.p_yaw.showGrid(x=True,y=True,alpha=.18); self.p_yaw.addLegend(); self.p_yaw.setLabel("bottom","时间",units="s"); self.p_yaw.setLabel("left","航向角",units="deg")
-        self.cy_t=self.p_yaw.plot(name="目标航向",pen=pg.mkPen((88,166,255),width=2)); self.cy_a=self.p_yaw.plot(name="实际航向",pen=pg.mkPen((255,184,77),width=2)); self.cy_e=self.p_yaw.plot(name="航向误差",pen=pg.mkPen((255,107,107),width=2))
+        self.cy_t=self.p_yaw.plot(name="目标航向",pen=theme.plot_pen(0)); self.cy_a=self.p_yaw.plot(name="实际航向",pen=theme.plot_pen(1)); self.cy_e=self.p_yaw.plot(name="航向误差",pen=theme.plot_pen(2))
         self.p_rate=pg.PlotWidget(title="角速度内环：目标角速度 / 实际角速度 / 转向输出")
         self.p_rate.showGrid(x=True,y=True,alpha=.18); self.p_rate.addLegend(); self.p_rate.setLabel("bottom","时间",units="s")
-        self.cr_t=self.p_rate.plot(name="目标角速度",pen=pg.mkPen((88,166,255),width=2)); self.cr_a=self.p_rate.plot(name="实际角速度",pen=pg.mkPen((90,214,142),width=2)); self.cr_s=self.p_rate.plot(name="转向输出",pen=pg.mkPen((187,134,252),width=2))
+        self.cr_t=self.p_rate.plot(name="目标角速度",pen=theme.plot_pen(0)); self.cr_a=self.p_rate.plot(name="实际角速度",pen=theme.plot_pen(3)); self.cr_s=self.p_rate.plot(name="转向输出",pen=theme.plot_pen(4))
         right.addWidget(self.p_yaw,1); right.addWidget(self.p_rate,1); root.addLayout(right,1)
         self.inspect_yaw=CurveInspector(self.p_yaw, lambda:(list(self.t), {"目标航向":list(self.s["target_yaw"]),"实际航向":list(self.s["yaw"]),"航向误差":list(self.s["yaw_error"])}))
         self.inspect_rate=CurveInspector(self.p_rate, lambda:(list(self.t), {"目标角速度":list(self.s["target_rate"]),"实际角速度":list(self.s["rate"]),"转向输出":list(self.s["steer"])}))

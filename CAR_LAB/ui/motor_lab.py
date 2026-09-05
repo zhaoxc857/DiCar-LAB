@@ -9,13 +9,13 @@ class MotorLab(QWidget):
         super().__init__();self.bus=bus;self.transport=transport;self.cfg=config.get("chassis_debug",{});self.motors=self.cfg.get("motors",[]);self.last={};self.encoder_test=None
         root=QVBoxLayout(self);ctrl=QGroupBox("单电机安全实验");g=QGridLayout(ctrl)
         self.unlock=QCheckBox("解锁电机实验（实车先架空）");self.motor=QComboBox();[self.motor.addItem(m.get("label",m.get("key","motor"))) for m in self.motors];self.mode=QComboBox();self.mode.addItems(["PWM %","目标 RPM"]);self.value=QDoubleSpinBox();self.value.setRange(-10000,10000);self.value.setValue(15)
-        f=QPushButton("正向运行");r=QPushButton("反向运行");s=QPushButton("停止当前");allstop=QPushButton("全部急停");enc=QPushButton("编码器方向检查")
+        f=QPushButton("正向运行");r=QPushButton("反向运行");s=QPushButton("停止当前");allstop=QPushButton("全部急停");allstop.setObjectName("danger");enc=QPushButton("编码器方向检查")
         f.clicked.connect(lambda:self._run(abs(self.value.value())));r.clicked.connect(lambda:self._run(-abs(self.value.value())));s.clicked.connect(lambda:self._run(0,force=True));allstop.clicked.connect(lambda:self.transport.command("emergency_stop",True));enc.clicked.connect(self._encoder_check)
         g.addWidget(self.unlock,0,0,1,4);g.addWidget(QLabel("电机"),1,0);g.addWidget(self.motor,1,1);g.addWidget(QLabel("模式"),1,2);g.addWidget(self.mode,1,3);g.addWidget(QLabel("值"),2,0);g.addWidget(self.value,2,1);g.addWidget(f,3,0);g.addWidget(r,3,1);g.addWidget(s,3,2);g.addWidget(allstop,3,3);g.addWidget(enc,4,0,1,4);root.addWidget(ctrl)
         pb=QGroupBox("当前电机 PID（在线 SET）");pg=QGridLayout(pb);self.pid={}
         for c,k in enumerate(("kp","ki","kd")):
             sp=QDoubleSpinBox();sp.setDecimals(5);sp.setRange(-9999,9999);sp.setSingleStep(.01);self.pid[k]=sp;pg.addWidget(QLabel(k.upper()),0,c);pg.addWidget(sp,1,c)
-        send=QPushButton("下发当前电机 PID");send.clicked.connect(self._send_pid);pg.addWidget(send,2,0,1,3);root.addWidget(pb)
+        send=QPushButton("下发当前电机 PID");send.setObjectName("primary");send.clicked.connect(self._send_pid);pg.addWidget(send,2,0,1,3);root.addWidget(pb)
         self.table=QTableWidget(0,7);self.table.setHorizontalHeaderLabels(["电机","RPM","Encoder","Current","PWM","方向期望","key"]);root.addWidget(self.table,1);self.result=QPlainTextEdit();self.result.setReadOnly(True);self.result.setMaximumHeight(120);root.addWidget(self.result)
         bus.telemetry.connect(self._tel);self.timer=QTimer(self);self.timer.timeout.connect(self._tick);self.timer.start(50);self._refresh()
     def _selected(self):

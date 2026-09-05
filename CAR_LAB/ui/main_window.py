@@ -2,11 +2,14 @@ from PySide6.QtCore import Qt, QSettings, QTimer
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QLineEdit, QSpinBox, QMessageBox, QFrame, QTreeWidget,
-    QTreeWidgetItem, QStackedWidget, QSplitter, QMenu, QToolButton
+    QTreeWidgetItem, QStackedWidget, QSplitter, QMenu, QToolButton, QDialog
 )
+from core.appearance import load_appearance, save_appearance, wallpaper_active
 from core.config import list_vehicle_files, load_vehicle_config, validate_vehicle_config
 from core.ports import list_serial_ports
 from core.version import DISPLAY_VERSION, VERSION
+from ui import theme as ui_theme
+from ui.appearance_dialog import AppearanceDialog
 from ui.overview import OverviewPage
 from ui.scope import ScopePage
 from ui.speed_lab import SpeedLab
@@ -31,7 +34,8 @@ from ui.share import SharePage
 from ui.missions import MissionsPage
 from ui.qc_checklist import QcChecklistPage
 from ui.onboarding import OnboardingDialog
-from ui.theme import THEME_STYLES, apply_plot_theme, make_ikun_icon
+from ui.wallpaper import WallpaperCanvas
+from ui.theme import apply_plot_theme, make_ikun_icon
 
 
 
@@ -75,13 +79,14 @@ class MainWindow(QMainWindow):
         self.bus = bus; self.transport = transport; self.config = config
         self.page_specs = []
         self.settings = QSettings("DiCAR", "DiCAR LAB")
+        self.appearance = load_appearance(self.settings)
         self.theme_name = self.settings.value("theme", "白色")
-        if self.theme_name not in THEME_STYLES:
+        if self.theme_name not in ui_theme.TOKENS:
             self.theme_name = "白色"
         self.setWindowTitle(DISPLAY_VERSION)
         self.setMinimumSize(1180, 760)
         self.resize(1500, 900)
-        self.setStyleSheet(THEME_STYLES[self.theme_name])
+        self.setStyleSheet(self._current_qss())
         self.setWindowIcon(make_ikun_icon(self.theme_name))
         self._build()
         self._apply_theme(self.theme_name, persist=False)
@@ -102,7 +107,7 @@ class MainWindow(QMainWindow):
         dialog.show()
 
     def _build(self):
-        central = QWidget(); root = QVBoxLayout(central)
+        central = WallpaperCanvas(lambda: self.appearance); self.central_canvas = central; root = QVBoxLayout(central)
         root.setContentsMargins(10, 10, 10, 10); root.setSpacing(8)
         root.addWidget(self._build_header())
 
@@ -140,7 +145,7 @@ class MainWindow(QMainWindow):
         quick = QLabel("调车工作区")
         quick.setObjectName("muted")
         row1.addWidget(quick)
-        for text, idx in [("速度", 2), ("航向", 3), ("示波器", 1), ("弯道", 15)]:
+        for text, idx in [("速度", 2), ("航向", 3), ("示波器", 1), ("弯道", 16)]:
             b=QPushButton(text); b.setFixedHeight(28)
             b.clicked.connect(lambda _=False,i=idx:self._select_page(i))
             row1.addWidget(b)
@@ -148,6 +153,9 @@ class MainWindow(QMainWindow):
         guide_btn = QPushButton("引导"); guide_btn.setFixedHeight(28); guide_btn.setToolTip("使用引导：新手指路四步")
         guide_btn.clicked.connect(lambda: self.show_onboarding(force=True))
         row1.addWidget(guide_btn)
+        appearance_btn = QPushButton("🎨 外观"); appearance_btn.setFixedHeight(28); appearance_btn.setToolTip("主题、背景图片与毛玻璃效果")
+        appearance_btn.clicked.connect(self.show_appearance)
+        row1.addWidget(appearance_btn)
         outer.addLayout(row1)
 
         row = QHBoxLayout(); row.setSpacing(7)
@@ -267,7 +275,13 @@ class MainWindow(QMainWindow):
             if dispose: dispose()
             self.stack.removeWidget(w); w.deleteLater()
         for _, _, cls in self.page_specs:
-            self.stack.addWidget(self._instantiate_page(cls))
+            page = self._instantiate_page(cls)
+            lay = page.layout()
+            if lay is not None:
+                # 统一全部页面的根边距/间距节奏（10px），页面内部布局不受影响
+                lay.setContentsMargins(*(ui_theme.MARGIN,) * 4)
+                lay.setSpacing(ui_theme.MARGIN)
+            self.stack.addWidget(page)
 
     def _nav_clicked(self, item, column):
         if item is None:
@@ -308,11 +322,19 @@ class MainWindow(QMainWindow):
                 self.nav.setCurrentItem(item)
 
 
+    def _current_qss(self):
+        """按主题 + 外观（壁纸/面板不透明度）生成整窗样式表。"""
+        return ui_theme.build_qss(
+            self.theme_name,
+            wallpaper=wallpaper_active(self.appearance),
+            panel_opacity=self.appearance.get("panel_opacity", 78),
+        )
+
     def _apply_theme(self, theme_name, persist=True):
-        if theme_name not in THEME_STYLES:
-            theme_name = "黑色"
+        if theme_name not in ui_theme.TOKENS:
+            theme_name = "白色"
         self.theme_name = theme_name
-        self.setStyleSheet(THEME_STYLES[theme_name])
+        self.setStyleSheet(self._current_qss())
         self.setWindowIcon(make_ikun_icon(theme_name))
         apply_plot_theme(self, theme_name)
         if hasattr(self, "theme_combo") and self.theme_combo.currentText() != theme_name:
@@ -321,6 +343,25 @@ class MainWindow(QMainWindow):
             self.theme_combo.blockSignals(False)
         if persist:
             self.settings.setValue("theme", theme_name)
+
+    def _on_dialog_theme(self, name):
+        self._apply_theme(name, persist=False)
+
+    def _on_dialog_appearance(self, appearance, persist):
+        self.appearance = dict(appearance)
+        if persist:
+            save_appearance(self.settings, self.appearance)
+        # 重新生成 QSS（壁纸模式/透明度变化）并刷新画布与图表底色
+        self._apply_theme(self.theme_name, persist=False)
+
+    def show_appearance(self):
+        dialog = AppearanceDialog(
+            self.theme_name, self.appearance,
+            self._on_dialog_theme, self._on_dialog_appearance, self,
+        )
+        dialog.exec()
+        if dialog.result() == QDialog.DialogCode.Accepted:
+            self._apply_theme(self.theme_name, persist=True)
 
     def _vehicle_changed(self, index):
         path = self.vehicle_combo.currentData()
@@ -360,15 +401,15 @@ class MainWindow(QMainWindow):
         if errors:
             self.param_check.setText(f"参数检查：{len(errors)} 个错误")
             self.param_check.setToolTip("\n".join(x["message"] for x in errors))
-            self.param_check.setStyleSheet("color:#b42318;font-weight:700;")
+            self.param_check.setStyleSheet(f"color:{ui_theme.state_color('bad')};font-weight:700;")
         elif issues:
             self.param_check.setText(f"参数检查：{len(issues)} 条提示")
             self.param_check.setToolTip("\n".join(x["message"] for x in issues))
-            self.param_check.setStyleSheet("color:#9a6700;font-weight:700;")
+            self.param_check.setStyleSheet(f"color:{ui_theme.state_color('warn')};font-weight:700;")
         else:
             self.param_check.setText("参数检查：OK")
             self.param_check.setToolTip("未发现明显 key 冲突。")
-            self.param_check.setStyleSheet("color:#1a7f37;font-weight:700;")
+            self.param_check.setStyleSheet(f"color:{ui_theme.state_color('ok')};font-weight:700;")
 
     def _update_connection_fields(self, mode):
         serial = mode in ("串口", "蓝牙串口")
