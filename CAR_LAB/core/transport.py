@@ -25,6 +25,7 @@ class SerialWorker(QObject):
 
     opened = Signal(bool, str, int)
     rx = Signal(bytes)
+    write_error = Signal(str)
     closed = Signal()
 
     def __init__(self):
@@ -65,11 +66,13 @@ class SerialWorker(QObject):
 
     @Slot(bytes)
     def write(self, data):
-        if self._serial is not None:
-            try:
-                self._serial.write(data)
-            except Exception:
-                pass
+        if self._serial is None:
+            return
+        try:
+            self._serial.write(data)
+        except Exception as e:
+            # 发送失败必须可见：计入市诊断页的 TX 失败计数（端口被占用/拔出等）。
+            self.write_error.emit(str(e))
 
     def _teardown(self):
         if self._timer is not None:
@@ -134,6 +137,7 @@ class TransportManager(QObject):
         self._serial_write_sig.connect(self._serial_worker.write)
         self._serial_worker.opened.connect(self._on_serial_opened)
         self._serial_worker.rx.connect(self._on_serial_rx)
+        self._serial_worker.write_error.connect(self._on_serial_write_error)
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._poll)
         self.poll_timer.start(10)
@@ -258,6 +262,9 @@ class TransportManager(QObject):
         if self.kind == "serial":
             self.protocol.feed(data)
 
+    def _on_serial_write_error(self, message):
+        self.bus.tx_error.emit(str(message))
+
     def shutdown(self):
         self.disconnect()
         self._serial_thread.quit()
@@ -329,7 +336,11 @@ class TransportManager(QObject):
         if not op:
             return
         key = str(detail.get("key", ""))
-        seq_match = detail.get("seq") is not None and str(detail.get("seq")) == str(op.get("seq"))
+        seq = detail.get("seq")
+        seq_match = seq is not None and str(seq) == str(op.get("seq"))
+        if seq is not None and not seq_match:
+            # 带 seq 但不匹配：同 key 的旧 ACK，直接丢弃，避免串扰。
+            return
         if not (seq_match or key == op["key"]):
             return
         if not detail.get("ok", True):

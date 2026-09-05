@@ -1,6 +1,6 @@
 
 from collections import deque
-import json, sys, time
+import json, logging, time
 from core.paths import data_root
 import pyqtgraph as pg
 from PySide6.QtCore import QTimer
@@ -63,8 +63,8 @@ class CustomLoopLab(QWidget):
                 d=json.loads(self.store_path.read_text(encoding="utf-8"))
                 return d if isinstance(d,list) else []
         except Exception as e:
-            # 别静默：本地自定义环损坏时打到 stderr（会进 logs/launcher.log），否则用户会以为环凭空消失。
-            print(f"[CAR_LAB] 读取本地自定义环失败 {self.store_path}: {e}", file=sys.stderr)
+            # 别静默：本地自定义环损坏时记入日志（logs/dicar_lab.log），否则用户会以为环凭空消失。
+            logging.getLogger(__name__).warning("读取本地自定义环失败 %s: %s", self.store_path, e)
         return []
 
     def _build(self):

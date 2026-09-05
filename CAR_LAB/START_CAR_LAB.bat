@@ -1,10 +1,10 @@
 @echo off
 setlocal EnableExtensions
-title CAR LAB Launcher
+title DiCAR LAB Launcher
 cd /d "%~dp0"
 
 echo ==========================================
-echo CAR LAB v1.3.1
+echo DiCAR LAB v1.10.0
 echo ==========================================
 echo.
 
@@ -56,15 +56,15 @@ if errorlevel 1 (
 
 :RUN
 echo.
-echo Starting CAR LAB...
+echo Starting DiCAR LAB...
 echo.
 "%VENV%" "%~dp0main.py"
 set "ERR=%ERRORLEVEL%"
 echo.
 if "%ERR%"=="0" (
-    echo CAR LAB exited normally.
+    echo DiCAR LAB exited normally.
 ) else (
-    echo CAR LAB failed. Error code: %ERR%
+    echo DiCAR LAB failed. Error code: %ERR%
     echo Please send this window screenshot.
 )
 pause

@@ -3,6 +3,7 @@ import sys
 from PySide6.QtWidgets import QApplication, QMessageBox
 from core.config import load_vehicle_config
 from core.bus import DataBus
+from core.logsetup import setup_logging
 from core.protocol import JsonLineProtocol
 from core.transport import TransportManager
 from core.startup_check import run_startup_checks, format_checks, write_error_log
@@ -10,6 +11,7 @@ from core.version import DISPLAY_VERSION
 from ui.main_window import MainWindow
 
 def main():
+    setup_logging()
     app=QApplication(sys.argv)
     app.setApplicationName(DISPLAY_VERSION)
 

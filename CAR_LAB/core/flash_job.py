@@ -21,7 +21,7 @@ ALLOWED_TRANSITIONS = {
         FlashState.FAILED,
         FlashState.CANCELLED,
     },
-    FlashState.FLASHING: {FlashState.VERIFYING, FlashState.FAILED},
+    FlashState.FLASHING: {FlashState.VERIFYING, FlashState.FAILED, FlashState.CANCELLED},
     FlashState.VERIFYING: {FlashState.SUCCEEDED, FlashState.FAILED},
     FlashState.SUCCEEDED: {FlashState.IDLE},
     FlashState.FAILED: {FlashState.IDLE},

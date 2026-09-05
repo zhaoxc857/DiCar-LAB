@@ -8,7 +8,7 @@ class DiagnosticsPage(QWidget):
     def __init__(self,bus,transport,config):
         super().__init__()
         self.bus=bus; self.transport=transport; self.last_tel=None; self.tel_intervals=deque(maxlen=200)
-        self.rx=0; self.tx=0; self.protocol_errors=0
+        self.rx=0; self.tx=0; self.protocol_errors=0; self.tx_errors=0
         self.config_issues=validate_vehicle_config(config); self.param_events=deque(maxlen=100)
         root=QVBoxLayout(self)
         box=QGroupBox("实时通信诊断"); g=QGridLayout(box)
@@ -20,7 +20,7 @@ class DiagnosticsPage(QWidget):
         self.advice=QPlainTextEdit(); self.advice.setReadOnly(True); root.addWidget(self.advice,1)
         clear=QPushButton("清空诊断计数"); clear.clicked.connect(self._clear); root.addWidget(clear)
         bus.connection.connect(self._connection); bus.telemetry.connect(self._tel); bus.rx_text.connect(self._rx)
-        bus.tx_text.connect(self._tx); bus.event.connect(self._event); bus.parameter_sync.connect(self._param_sync)
+        bus.tx_text.connect(self._tx); bus.tx_error.connect(self._tx_error); bus.event.connect(self._event); bus.parameter_sync.connect(self._param_sync)
         timer=QTimer(self); timer.timeout.connect(self._update); timer.start(500)
 
     def _connection(self,ok,text):
@@ -33,11 +33,12 @@ class DiagnosticsPage(QWidget):
         self.last_tel=now
     def _rx(self,_): self.rx+=1
     def _tx(self,_): self.tx+=1
+    def _tx_error(self,_): self.tx_errors+=1
     def _event(self,typ,_data):
         if typ=="protocol_error": self.protocol_errors+=1
     def _param_sync(self,info): self.param_events.append(dict(info))
     def _clear(self):
-        self.rx=self.tx=self.protocol_errors=0; self.tel_intervals.clear(); self.param_events.clear()
+        self.rx=self.tx=self.protocol_errors=self.tx_errors=0; self.tel_intervals.clear(); self.param_events.clear()
     def _update(self):
         connected=self.transport.connected
         hz=1/(sum(self.tel_intervals)/len(self.tel_intervals)) if self.tel_intervals else 0
@@ -47,9 +48,10 @@ class DiagnosticsPage(QWidget):
         else:
             self.rate.setText(f"{hz:.1f} Hz")
             self.age.setText("--" if not self.last_tel else f"{age:.0f} ms")
-        self.counts.setText(f"RX {self.rx} / TX {self.tx}")
+        self.counts.setText(f"RX {self.rx} / TX {self.tx}" + (f" / TX失败 {self.tx_errors}" if self.tx_errors else ""))
         self.err.setText(f"协议错误 {self.protocol_errors}")
         tips=[]
+        if self.tx_errors: tips.append(f"串口发送失败 {self.tx_errors} 次：端口可能被占用或已拔出，建议断开后重连。")
         if connected and age>500: tips.append("已连接但超过 500ms 没有 TEL。")
         if connected and 0<hz<20: tips.append("遥测低于 20Hz，实时 PID 曲线会明显变迟钝。")
         if connected and hz>250: tips.append("遥测高于 250Hz，JSON 串口可能成为带宽瓶颈。")

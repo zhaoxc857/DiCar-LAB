@@ -6,6 +6,7 @@ class DataBus(QObject):
     ack_detail = Signal(dict)                 # seq/ok/error
     rx_text = Signal(str)
     tx_text = Signal(str)
+    tx_error = Signal(str)
     connection = Signal(bool, str)
     parameter_changed = Signal(str, object, object)
     parameter_sync = Signal(dict)

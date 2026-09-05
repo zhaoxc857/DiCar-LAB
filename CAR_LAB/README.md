@@ -21,7 +21,7 @@ python main.py
 
 普通用户无需从本目录运行源码。请从 [GitHub Releases](https://github.com/zhaoxc857/DiCar-LAB/releases) 下载 `DiCAR-LAB-v1.10.0-Windows-x64-onefile.exe`（单文件版，双击即用）或 `DiCAR-LAB-v1.10.0-Windows-x64.zip`（便携 ZIP 版，完整解压后运行 `DiCAR LAB.exe`）。发布包通过根目录的 `build_portable_windows.bat` / `build_onefile_windows.ps1` 生成。
 
-固件烧录页当前只实现可扩展的安全状态边界，运行按钮默认禁用；本版本不会执行任何烧录命令。
+固件烧录页支持 STM32F1/F4（stm32flash）与 TI MSPM0G3507（内置 TI ROM BSL 驱动）的无线烧录：每次烧录自动快照进固件版本库（可加备注、一键回退），写入进度以进度条显示，擦除/写入/校验各阶段可取消。STM32 与 MSPM0 均需按烧录页指引把车辆置于 bootloader 模式。
 
 ## 安全提示
 

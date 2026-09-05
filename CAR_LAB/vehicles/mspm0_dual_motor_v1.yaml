@@ -10,6 +10,9 @@ transport:
   type: serial
   port: COM3
   # ROM BSL 固定 9600-8N1，蓝牙模块按此配置，应用链路保持一致。
+  # 注意：9600 是 BSL 烧录链路的硬性约束；若遥测频率不够，可把蓝牙
+  # AT 配置改高（如 AT+UART=115200,0,0），并把本 baudrate 一并修改，
+  # 烧录时 BSL 驱动始终以 9600 独立打开串口，互不影响。
   baudrate: 9600
 ble:
   write_uuid: ''

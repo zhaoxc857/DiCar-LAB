@@ -79,6 +79,58 @@ class FakeSerial:
         self.close_called = True
 
 
+class SerialWriteErrorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_write_error_is_emitted_not_swallowed(self):
+        from core.transport import SerialWorker
+
+        class BrokenSerial:
+            def write(self, data):
+                raise OSError("port gone")
+
+        worker = SerialWorker()
+        errors = []
+        worker.write_error.connect(errors.append)
+        worker._serial = BrokenSerial()
+        worker.write(b"SET\n")
+        self.assertEqual(1, len(errors), "发送失败必须暴露给诊断，不允许静默吞掉")
+        self.assertIn("port gone", errors[0])
+
+
+class AckMatchingTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _make_transport(self):
+        bus = DataBus()
+        protocol = JsonLineProtocol(bus)
+        return TransportManager(bus, protocol, {"vehicle": {"display_name": "t"}})
+
+    def test_stale_seq_ack_with_same_key_is_dropped(self):
+        import time as _time
+
+        transport = self._make_transport()
+        transport._param_inflight = {
+            "kind": "SET", "key": "speed_kp", "value": 1.0,
+            "seq": 7, "retry": 0, "sent_at": _time.monotonic(),
+        }
+        # 带 seq 但不匹配：同 key 的旧 ACK，应丢弃
+        transport._handle_ack_detail(
+            {"key": "speed_kp", "value": 1.0, "seq": 8, "ok": True, "error": None}
+        )
+        self.assertIsNotNone(transport._param_inflight)
+        # 老固件不带 seq：仍按 key 兜底接受
+        transport._handle_ack_detail(
+            {"key": "speed_kp", "value": 1.0, "seq": None, "ok": True, "error": None}
+        )
+        self.assertIsNone(transport._param_inflight)
+        transport.shutdown()
+
+
 class SerialCloseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

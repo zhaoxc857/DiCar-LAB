@@ -26,6 +26,18 @@ logs/
 **/data/custom_loops.json
 **/profiles/*/
 
+# 固件版本库快照（每次烧录生成的用户数据）
+**/firmware_library/
+
+# 回放录制（用户数据）
+**/recordings/
+
+# 本机开发用启动脚本（不入库）
+启动新版CAR LAB.bat
+
+# ZCode 会话工作目录
+.zcode/
+
 # 生成的报告
 **/reports/*
 

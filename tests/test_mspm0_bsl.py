@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from core.mspm0_bsl import (
     MSPM0G_FLASH_BASE,
+    MSPM0G_FLASH_END,
     BslCancelled,
     BslError,
     CoreStatus,
@@ -44,19 +45,32 @@ class Mspm0FlashFlowTests(unittest.TestCase):
 
     def test_full_flash_recipe_programs_device_memory(self):
         log = []
-        flash_image(self.transport, IMAGE, log=log.append)
+        stages = []
+        flash_image(self.transport, IMAGE, log=log.append, stage=stages.append)
         self.assertTrue(self.device.started)
         self.assertEqual(
             IMAGE,
             bytes(self.device.memory[: len(IMAGE)]),
             "写入后设备存储应与固件一致",
         )
+        # 擦除覆盖整个用户区：新固件比旧固件短时也不会残留旧代码
         self.assertEqual(
-            [(MSPM0G_FLASH_BASE, MSPM0G_FLASH_BASE + len(IMAGE))],
+            [(MSPM0G_FLASH_BASE, MSPM0G_FLASH_END)],
             self.device.erased_ranges,
         )
         self.assertIn("BSL 解锁成功", log)
         self.assertIn("CRC 校验通过，启动应用…", log)
+        self.assertEqual(
+            ["connecting", "erasing", "programming", "verifying", "starting"],
+            stages,
+        )
+
+    def test_erase_can_be_limited_to_image_range(self):
+        flash_image(self.transport, IMAGE, erase_full_user_area=False)
+        self.assertEqual(
+            [(MSPM0G_FLASH_BASE, MSPM0G_FLASH_BASE + len(IMAGE))],
+            self.device.erased_ranges,
+        )
 
     def test_wrong_password_fails_with_password_error(self):
         with self.assertRaises(BslError) as ctx:
@@ -112,6 +126,37 @@ class Mspm0FlashFlowTests(unittest.TestCase):
             )
         self.assertTrue(seen)
         self.assertFalse(self.device.started)
+
+    def test_cancellation_responds_during_blocking_wait(self):
+        # 设备沉默（模拟芯片在擦除/响应前不回字节）时，取消也应立即生效，
+        # 而不是等满 15s 读超时。
+        class SilentTransport:
+            def __init__(self, device):
+                self.device = device
+                self.writes = 0
+
+            def write(self, data):
+                self.writes += 1
+                return self.device.write(data)
+
+            def flush(self):
+                pass
+
+            def read(self, count):
+                return b""  # 永远沉默
+
+        transport = SilentTransport(self.device)
+        driver = Mspm0RomBsl(transport, timeout_s=30.0, should_continue=lambda: False)
+        with self.assertRaises(BslCancelled):
+            driver.connect()
+        self.assertEqual(1, transport.writes)
+
+    def test_identity_response_is_parsed_for_logging(self):
+        driver = Mspm0RomBsl(self.transport)
+        driver.connect()
+        info = driver.device_info()
+        self.assertEqual(6, info.command_interpreter_version)
+        self.assertEqual(144, info.max_buffer_size)
 
     def test_program_chunks_pad_to_eight_byte_alignment(self):
         odd_image = b"\x01\x02\x03"  # 3 bytes -> one 8-byte padded packet

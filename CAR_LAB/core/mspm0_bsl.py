@@ -19,6 +19,16 @@ verification because the original was never hardware-tested:
   transport ack 0x52 (checksum incorrect), this is the first suspect.
 - The default BSL password (32 x 0xFF) applies when NONMAIN still ships
   factory settings; a custom password needs NONMAIN programming.
+
+Erase semantics: flash_image by default erases the whole user flash range
+(base .. end of main flash) instead of only the image length, so flashing a
+smaller image can never leave stale code behind. The verify step still
+covers the image region only - erased-flash CRCs are not a stable contract
+across devices (ECC), so they are not asserted.
+
+Cancellation: when `should_continue` returns False, every stage responds
+between wire transactions (the blocking read loop checks it while waiting
+for device bytes), not only between program chunks.
 """
 
 from __future__ import annotations
@@ -37,6 +47,7 @@ PROGRAM_ALIGNMENT = 8
 MSPM0G_FLASH_BASE = 0x41C00000
 DEFAULT_BSL_PASSWORD = b"\xff" * 32
 G3507_MAIN_FLASH_SIZE = 128 * 1024
+MSPM0G_FLASH_END = MSPM0G_FLASH_BASE + G3507_MAIN_FLASH_SIZE
 
 CMD_CONNECTION = 0x12
 CMD_GET_IDENTITY = 0x19
@@ -203,12 +214,16 @@ class Mspm0RomBsl:
     where read returns up to n bytes and b"" means the link went away.
     """
 
-    def __init__(self, transport, timeout_s: float = 15.0):
+    def __init__(self, transport, timeout_s: float = 15.0, should_continue=None):
         self.transport = transport
         self.timeout_s = timeout_s
+        self.should_continue = should_continue
         self.connected = False
         self.unlocked = False
         self.info: DeviceInfo | None = None
+
+    def _should_stop(self) -> bool:
+        return self.should_continue is not None and not self.should_continue()
 
     def connect(self) -> None:
         self._write_and_ack(CMD_CONNECTION)
@@ -245,6 +260,8 @@ class Mspm0RomBsl:
     def program(self, address: int, image: bytes,
                 should_continue=None, progress=None) -> int:
         self._require_unlocked()
+        if should_continue is None:
+            should_continue = self.should_continue
         if address % PROGRAM_ALIGNMENT:
             raise BslError("state", "写入地址未按 8 字节对齐")
         info = self.info
@@ -315,6 +332,8 @@ class Mspm0RomBsl:
         while len(buffer) < count:
             chunk = self.transport.read(count - len(buffer))
             if not chunk:
+                if self._should_stop():
+                    raise BslCancelled()
                 if time.monotonic() >= deadline:
                     raise BslError("timeout", f"等待响应超时（已收 {len(buffer)}/{count} 字节）")
                 continue
@@ -340,25 +359,45 @@ class Mspm0RomBsl:
 
 def flash_image(transport, image: bytes, base_address: int = MSPM0G_FLASH_BASE,
                 password: bytes = DEFAULT_BSL_PASSWORD,
-                should_continue=None, progress=None, log=None) -> DeviceInfo:
+                should_continue=None, progress=None, log=None, stage=None,
+                erase_full_user_area: bool = True) -> DeviceInfo:
     """Run the full validated recipe: connect, info, unlock, erase, program,
-    verify, start. Raises BslError on any failure."""
-    driver = Mspm0RomBsl(transport)
+    verify, start. Raises BslError on any failure.
+
+    `stage` receives short machine-readable phase names ("connecting",
+    "erasing", "programming", "verifying", "starting") for progress UIs.
+    """
+    driver = Mspm0RomBsl(transport, should_continue=should_continue)
 
     def say(message: str):
         if log is not None:
             log(message)
 
+    def set_stage(name: str):
+        if stage is not None:
+            stage(name)
+
+    set_stage("connecting")
     driver.connect()
     info = driver.device_info()
-    say(f"BSL 连接成功：解释器 v{info.command_interpreter_version}，缓冲 {info.max_buffer_size} 字节")
+    say(
+        f"BSL 连接成功：解释器 v{info.command_interpreter_version}，"
+        f"构建 0x{info.build_id:04X}，应用修订 0x{info.application_revision:08X}，"
+        f"缓冲 {info.max_buffer_size} 字节，BSL 配置 0x{info.bsl_config_id:08X}"
+    )
     driver.unlock(password)
     say("BSL 解锁成功")
-    driver.erase_range(base_address, base_address + len(image))
+    erase_end = MSPM0G_FLASH_END if erase_full_user_area else base_address + len(image)
+    set_stage("erasing")
+    say(f"擦除主闪存 {(erase_end - base_address) // 1024}KB 用户区（整段擦除，避免旧固件残留）…")
+    driver.erase_range(base_address, erase_end)
+    set_stage("programming")
     say("擦除完成，开始写入…")
     driver.program(base_address, image, should_continue=should_continue, progress=progress)
+    set_stage("verifying")
     say("写入完成，回读 CRC 校验…")
     driver.verify_crc(base_address, len(image), mspm0_crc32(image))
+    set_stage("starting")
     say("CRC 校验通过，启动应用…")
     driver.start_application()
     return info

@@ -5,6 +5,23 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QGroupBox,QLabel
 
 
+def raw_to_voltage(raw, cfg):
+    """ADC raw 值 → 电池电压（使用车型 YAML 的 adc_bits/vref/divider/gain/offset）。
+
+    任一关键配置缺失或非法时返回 None，调用方回退为"不换算"。
+    """
+    try:
+        bits = float(cfg.get("adc_bits", 0)); vref = float(cfg.get("vref", 0))
+        r1 = float(cfg.get("divider_r1", 0)); r2 = float(cfg.get("divider_r2", 0))
+        gain = float(cfg.get("gain", 1.0)); offset = float(cfg.get("offset", 0.0))
+        raw = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if bits <= 0 or vref <= 0 or r2 <= 0:
+        return None
+    return raw / (2.0 ** bits) * vref * ((r1 + r2) / r2) * gain + offset
+
+
 class PowerMonitor(QWidget):
     def __init__(self,bus,config):
         super().__init__(); self.cfg=config.get("power_monitor",{}); self.t0=time.monotonic(); self.t=deque(maxlen=1800)
@@ -25,10 +42,18 @@ class PowerMonitor(QWidget):
         timer=QTimer(self); timer.timeout.connect(self._draw); timer.start(100)
     def _tel(self,d):
         c=self.cfg; bk=c.get("battery_key","battery"); rk=c.get("raw_key","battery_raw"); lk=c.get("left_current_key","left_current"); rr=c.get("right_current_key","right_current")
-        if bk not in d:return
-        v=float(d[bk]); li=float(d.get(lk,0)); ri=float(d.get(rr,0)); self.t.append(time.monotonic()-self.t0); self.v.append(v); self.li.append(li); self.ri.append(ri)
+        raw_text=str(d.get(rk,"--"))
+        if bk in d:
+            v=float(d[bk])
+        elif rk in d:
+            computed=raw_to_voltage(d[rk],c)
+            if computed is None:return
+            v=computed; raw_text=f"{d[rk]} → {v:.2f}V"
+        else:
+            return
+        li=float(d.get(lk,0)); ri=float(d.get(rr,0)); self.t.append(time.monotonic()-self.t0); self.v.append(v); self.li.append(li); self.ri.append(ri)
         self.min_v=v if self.min_v is None else min(self.min_v,v); self.max_v=v if self.max_v is None else max(self.max_v,v)
-        self.bat.setText(f"{v:.2f} V"); self.raw.setText(f"ADC RAW {d.get(rk,'--')}"); self.left.setText(f"左电流 {li:.2f} A"); self.right.setText(f"右电流 {ri:.2f} A")
+        self.bat.setText(f"{v:.2f} V"); self.raw.setText(f"ADC RAW {raw_text}"); self.left.setText(f"左电流 {li:.2f} A"); self.right.setText(f"右电流 {ri:.2f} A")
         self.sag.setText(f"压降 {(self.max_v-v):.2f} V | 最低 {self.min_v:.2f} V")
         warn=float(c.get("warning_voltage",10.8)); crit=float(c.get("critical_voltage",10.2))
         if v<=crit: txt="状态：CRITICAL 低电压"; css="color:#ff4d4f;font-weight:700"
