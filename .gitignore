@@ -32,6 +32,9 @@ logs/
 # 回放录制（用户数据）
 **/recordings/
 
+# 用户自选壁纸（外观设置的复制件）
+CAR_LAB/theme/
+
 # 本机开发用启动脚本（不入库）
 启动新版CAR LAB.bat
 
