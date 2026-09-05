@@ -1,10 +1,11 @@
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import Qt, QSettings, QTimer
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QLineEdit, QSpinBox, QMessageBox, QFrame, QTreeWidget,
-    QTreeWidgetItem, QStackedWidget, QSplitter
+    QTreeWidgetItem, QStackedWidget, QSplitter, QMenu, QToolButton
 )
 from core.config import list_vehicle_files, load_vehicle_config, validate_vehicle_config
+from core.ports import list_serial_ports
 from core.version import DISPLAY_VERSION, VERSION
 from ui.overview import OverviewPage
 from ui.scope import ScopePage
@@ -25,6 +26,11 @@ from ui.chassis_motion import ChassisMotionPage
 from ui.experiment_history import ExperimentHistoryPage
 from ui.diagnostics import DiagnosticsPage
 from ui.firmware_flash import FirmwareFlashPage
+from ui.replay import ReplayPage
+from ui.share import SharePage
+from ui.missions import MissionsPage
+from ui.qc_checklist import QcChecklistPage
+from ui.onboarding import OnboardingDialog
 from ui.theme import THEME_STYLES, apply_plot_theme, make_ikun_icon
 
 
@@ -36,25 +42,29 @@ PAGE_DEFS = [
         ("Speed Lab", "速度环在线调参", SpeedLab),
         ("Heading Lab", "航向外环 + 角速度内环", HeadingLab),
         ("自定义环", "任意 PID 环字段映射", CustomLoopLab),
+        ("复盘回放", "录制遥测会话并整机回放复盘", ReplayPage),
+        ("仿真闯关", "在仿真车上完成调参练习关卡", MissionsPage),
+        ("赛道分享", "手机浏览器实时查看遥测（只读）", SharePage),
     ]),
     ("车辆实验", [
-        ("AI 调参", "本地规则分析与阶跃测试", AITunerPage),
+        ("AI 调参", "本地规则分析、阶跃测试与自动扫参", AITunerPage),
         ("电源监控", "ADC、电池电压与电流", PowerMonitor),
         ("单电机实验", "单轮 PWM / RPM / 编码器", MotorLab),
         ("底盘调试", "多电机与 IMU 检查", ChassisDebugPage),
         ("麦轮运动", "全向底盘 Vx/Vy/Wz 目标 vs 实际 + PID", ChassisMotionPage),
+        ("下线检查", "整车交付检查单与 HTML 报告", QcChecklistPage),
     ]),
     ("参数与赛道", [
         ("全部参数", "统一读写 MCU 参数", ParametersPage),
         ("参数方案", "保存与恢复整车参数", ProfileManager),
-        ("赛道工程", "圈速、入弯/出弯与弯道事件分析", TrackLab),
+        ("赛道工程", "圈速、入弯/出弯、轨迹重建与弯道事件分析", TrackLab),
         ("实验档案", "历史实验与曲线比较", ExperimentHistoryPage),
     ]),
     ("工具", [
         ("系统诊断", "通信和车辆状态诊断", DiagnosticsPage),
         ("协议监视器", "查看 TX / RX 原始报文", ProtocolMonitor),
         ("MSP 适配", "MSPM0 / MSP430 接入帮助", MspAssistant),
-        ("固件烧录", "安全校验、烧录与写后验证", FirmwareFlashPage),
+        ("固件烧录", "安全校验、烧录、版本库与写后验证", FirmwareFlashPage),
     ]),
 ]
 
@@ -77,6 +87,19 @@ class MainWindow(QMainWindow):
         self._apply_theme(self.theme_name, persist=False)
         self.bus.connection.connect(self._on_connection)
         self.bus.event.connect(self._on_event)
+        if not self.settings.value("onboarding/done", False) in (True, "true"):
+            QTimer.singleShot(300, lambda: self.show_onboarding(force=False))
+
+    def show_onboarding(self, force=False):
+        """首次运行自动弹一次（非阻塞 show）；此后可随时从顶栏「引导」重开。"""
+        import os
+
+        if os.environ.get("DICAR_SMOKE_TEST") == "1" and not force:
+            return
+        dialog = OnboardingDialog(goto_page=self._select_page, parent=self)
+        dialog.setAttribute(Qt.WA_DeleteOnClose)
+        dialog.accepted.connect(lambda: self.settings.setValue("onboarding/done", True))
+        dialog.show()
 
     def _build(self):
         central = QWidget(); root = QVBoxLayout(central)
@@ -117,11 +140,14 @@ class MainWindow(QMainWindow):
         quick = QLabel("调车工作区")
         quick.setObjectName("muted")
         row1.addWidget(quick)
-        for text, idx in [("速度", 2), ("航向", 3), ("示波器", 1), ("弯道", 12)]:
+        for text, idx in [("速度", 2), ("航向", 3), ("示波器", 1), ("弯道", 15)]:
             b=QPushButton(text); b.setFixedHeight(28)
             b.clicked.connect(lambda _=False,i=idx:self._select_page(i))
             row1.addWidget(b)
         self.param_check = QLabel("参数检查：OK"); self.param_check.setObjectName("muted"); row1.addWidget(self.param_check)
+        guide_btn = QPushButton("引导"); guide_btn.setFixedHeight(28); guide_btn.setToolTip("使用引导：新手指路四步")
+        guide_btn.clicked.connect(lambda: self.show_onboarding(force=True))
+        row1.addWidget(guide_btn)
         outer.addLayout(row1)
 
         row = QHBoxLayout(); row.setSpacing(7)
@@ -129,6 +155,9 @@ class MainWindow(QMainWindow):
         self.vehicle_combo = QComboBox(); self.vehicle_combo.setMinimumWidth(250)
         self.vehicle_files = list_vehicle_files()
         initial_path = str(self.config.get("_path", ""))
+        last_vehicle = str(self.settings.value("vehicle/last", "") or "")
+        if last_vehicle in [str(p) for p in self.vehicle_files]:
+            initial_path = last_vehicle
         initial_index = 0
         for i, p in enumerate(self.vehicle_files):
             try:
@@ -145,6 +174,11 @@ class MainWindow(QMainWindow):
         self.mode = QComboBox(); self.mode.addItems(["仿真", "串口", "蓝牙串口", "BLE", "TCP"]); self.mode.setFixedWidth(115)
         row.addWidget(self.mode)
         self.port = QLineEdit("COM3"); self.port.setPlaceholderText("COM3"); self.port.setFixedWidth(78); row.addWidget(self.port)
+        self.port_menu_btn = QToolButton(); self.port_menu_btn.setText("▾"); self.port_menu_btn.setToolTip("扫描本机可用串口")
+        port_menu = QMenu(self.port_menu_btn)
+        port_menu.aboutToShow.connect(lambda: self._fill_port_menu(port_menu))
+        self.port_menu_btn.setMenu(port_menu); self.port_menu_btn.setPopupMode(QToolButton.InstantPopup)
+        row.addWidget(self.port_menu_btn)
         self.baud = QComboBox(); self.baud.addItems(["9600", "115200", "230400", "460800", "921600"]); self.baud.setFixedWidth(100); row.addWidget(self.baud)
         self.host = QLineEdit("127.0.0.1"); self.host.setFixedWidth(105); row.addWidget(self.host)
         self.tcp_port = QSpinBox(); self.tcp_port.setRange(1,65535); self.tcp_port.setValue(9000); self.tcp_port.setFixedWidth(78); row.addWidget(self.tcp_port)
@@ -160,6 +194,14 @@ class MainWindow(QMainWindow):
         self._update_parameter_check(self.config)
         self._update_connection_fields(self.mode.currentText())
         return top
+
+    def _fill_port_menu(self, menu):
+        menu.clear()
+        ports = list_serial_ports()
+        if not ports:
+            action = menu.addAction("未发现串口设备"); action.setEnabled(False); return
+        for device in ports:
+            menu.addAction(device, lambda d=device: self.port.setText(d))
 
     def _build_sidebar(self):
         side = QFrame(); side.setObjectName("sidebar"); side.setMinimumWidth(205); side.setMaximumWidth(270)
@@ -210,7 +252,9 @@ class MainWindow(QMainWindow):
                 transport=self.transport,
                 flash_backend=find_stm32flash(),
             )
-        if cls in (OverviewPage, ScopePage, PowerMonitor, TrackLab, MspAssistant):
+        if cls is OverviewPage:
+            return cls(self.bus, self.config, transport=self.transport)
+        if cls in (ScopePage, PowerMonitor, TrackLab, MspAssistant):
             if cls is MspAssistant: return cls(self.config)
             return cls(self.bus, self.config)
         if cls is ProtocolMonitor:
@@ -285,6 +329,7 @@ class MainWindow(QMainWindow):
             cfg = load_vehicle_config(path)
         except Exception as e:
             QMessageBox.warning(self, "车型配置读取失败", str(e)); return
+        self.settings.setValue("vehicle/last", str(path))
         if self.transport.connected:
             self.transport.disconnect()
         self.config = cfg; self.transport.config = cfg
@@ -338,9 +383,18 @@ class MainWindow(QMainWindow):
             elif mode == "串口": self.transport.connect_serial(self.port.text().strip(), int(self.baud.currentText()), label="串口")
             elif mode == "蓝牙串口": self.transport.connect_serial(self.port.text().strip(), int(self.baud.currentText()), label="蓝牙串口")
             elif mode == "BLE":
-                dlg = BleConnectDialog(self.transport, self.config.get("ble", {}), self)
+                defaults = dict(self.config.get("ble", {}))
+                for key in ("address", "write_uuid", "notify_uuid"):
+                    saved = str(self.settings.value(f"ble/last_{key}", "") or "")
+                    if saved:
+                        defaults[key] = saved
+                dlg = BleConnectDialog(self.transport, defaults, self)
                 if not dlg.exec(): return
-                v = dlg.values(); self.transport.connect_ble(v["address"], v["write_uuid"], v["notify_uuid"], v["auto_reconnect"])
+                v = dlg.values()
+                for key in ("address", "write_uuid", "notify_uuid"):
+                    if v.get(key):
+                        self.settings.setValue(f"ble/last_{key}", str(v[key]))
+                self.transport.connect_ble(v["address"], v["write_uuid"], v["notify_uuid"], v["auto_reconnect"])
             else: self.transport.connect_tcp(self.host.text().strip(), self.tcp_port.value())
         except Exception as e:
             QMessageBox.critical(self, "连接失败", str(e))

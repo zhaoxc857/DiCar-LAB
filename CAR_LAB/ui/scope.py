@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.wave_store import load_wave_csv, save_wave_csv
+from core.scope_math import DERIVED_CHANNELS, DERIVED_PRESET, derive_channels
 from core.paths import data_root
 
 from datetime import datetime
@@ -107,12 +108,14 @@ class ScopePage(QWidget):
         self.bus=bus; self.config=config
         # 车型可在 YAML 里用 channel_names / scope_presets 扩展中文通道名与工作组，与内置合并。
         self.channel_names=dict(CHANNEL_NAMES)
+        self.channel_names.update(DERIVED_CHANNELS)
         for k,v in (config.get("channel_names",{}) or {}).items():
             if isinstance(v,(list,tuple)):
                 self.channel_names[str(k)]=(str(v[0]), str(v[1]) if len(v)>1 else str(v[0]))
             else:
                 self.channel_names[str(k)]=(str(v), str(k))
         self.presets=dict(PRESETS)
+        self.presets.update(DERIVED_PRESET)
         for name,keys in (config.get("scope_presets",{}) or {}).items():
             if isinstance(keys,(list,tuple)):
                 self.presets[str(name)]=[str(x) for x in keys]
@@ -180,6 +183,9 @@ class ScopePage(QWidget):
         label,_=self.channel_names.get(key,(key,key)); return label
 
     def _ctip(self,key):
+        if key.startswith("@"):
+            label,en=self.channel_names.get(key,(key,key))
+            return f"{label}\n{en}\n上位机派生通道（由原始字段计算，非 MCU 字段）"
         label,en=self.channel_names.get(key,(key,key)); return f"{label}\n{en}\n协议字段：{key}"
 
     def apply_preset(self,name):
@@ -213,8 +219,8 @@ class ScopePage(QWidget):
     def _tel(self,d):
         if not d or self.replay_mode:return
         now=time.monotonic()-self.t0; self.t.append(now)
-        for k,v in d.items():
-            if isinstance(v,(int,float)):
+        for k,v in list(d.items()) + list(derive_channels(d,self.config).items()):
+            if isinstance(v,(int,float)) and not isinstance(v,bool):
                 if k not in self.channels:
                     self.channels.append(k)
                     self._rebuild_list(self._selected())

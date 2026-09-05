@@ -37,6 +37,14 @@ class FirmwareProtocolContractTests(unittest.TestCase):
         for key in ("control_enabled", "base_pwm", "line_kp", "line_kd"):
             self.assertIn(f'"{key}"', source)
 
+    def test_adapter_reports_firmware_version_on_cmd(self):
+        source = self.read_firmware_file("dctp_port.c")
+        header = self.read_firmware_file("dctp_port.h")
+        self.assertIn('"fw_version"', source)
+        self.assertIn("fw_version=", source)
+        self.assertIn("DCTP_PORT_VERSION", header)
+        self.assertIn('"1.1.0"', header)
+
 
 if __name__ == "__main__":
     unittest.main()

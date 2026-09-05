@@ -4,6 +4,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Firmware version reported to the host on CMD fw_version as
+ * {"type":"NOTE","data":"fw_version=<DCTP_PORT_VERSION>"}; bump on
+ * protocol/behaviour changes so the PC firmware library can tag builds. */
+#define DCTP_PORT_VERSION "1.1.0"
+
 typedef struct {
     bool enabled;
     float base_pwm;

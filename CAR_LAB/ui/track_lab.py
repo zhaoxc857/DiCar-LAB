@@ -1,6 +1,7 @@
 import time
 
-from PySide6.QtCore import Qt
+import pyqtgraph as pg
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget,
     QTableWidgetItem, QLineEdit, QGroupBox, QDoubleSpinBox, QSpinBox,
@@ -8,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.corner_analyzer import CornerAnalyzer
+from core.track_map import TrackMapIntegrator
 
 
 class TrackLab(QWidget):
@@ -22,6 +24,14 @@ class TrackLab(QWidget):
         self.last_trigger = 0
         self.lap_enter_base = 0
         self.lap_exit_base = 0
+        # 轨迹重建（航位推算）：每圈一条折线，画在同一坐标系里便于对比
+        self.map_integrator = TrackMapIntegrator(
+            speed_key=self.cfg.get("speed_key", "speed"),
+            yaw_rate_key=self.cfg.get("yaw_rate_key", "gyro_z"),
+        )
+        self.map_paths = [[]]
+        self.map_colors = [(45, 108, 210), (220, 135, 40), (190, 65, 75), (40, 155, 100), (125, 80, 180)]
+        self._map_curves = []
 
         corner_cfg = dict(self.cfg.get("corner_analysis", {}) or {})
         corner_cfg.setdefault("speed_key", self.cfg.get("speed_key", "speed"))
@@ -44,14 +54,19 @@ class TrackLab(QWidget):
 
         split = QSplitter(Qt.Orientation.Vertical)
         split.addWidget(self._build_lap_panel())
+        split.addWidget(self._build_map_panel())
         split.addWidget(self._build_corner_panel())
-        split.setSizes([270, 430])
-        split.setStretchFactor(1, 1)
+        split.setSizes([240, 260, 380])
+        split.setStretchFactor(2, 1)
         root.addWidget(split, 1)
 
         bus.telemetry.connect(self._tel)
         self._sync_corner_controls_from_config()
         self._refresh_counts()
+        self._map_timer = QTimer(self)
+        self._map_timer.setInterval(150)
+        self._map_timer.timeout.connect(self._draw_map)
+        self._map_timer.start(150)
 
     def _build_session_bar(self):
         box = QFrame()
@@ -150,6 +165,63 @@ class TrackLab(QWidget):
         row.addWidget(c)
         row.addStretch(1)
         return row
+
+    def _build_map_panel(self):
+        box = QFrame()
+        box.setObjectName("panel")
+        lay = QVBoxLayout(box)
+        row = QHBoxLayout()
+        title = QLabel("轨迹重建（航位推算：speed + gyro_z 积分，会漂移，比例可校准）")
+        title.setObjectName("panelTitle")
+        row.addWidget(title)
+        row.addWidget(QLabel("比例"))
+        self.map_scale = QDoubleSpinBox()
+        self.map_scale.setRange(0.001, 1000.0)
+        self.map_scale.setDecimals(3)
+        self.map_scale.setValue(1.0)
+        self.map_scale.setSingleStep(0.5)
+        self.map_scale.setSuffix(" m/单位")
+        self.map_scale.valueChanged.connect(self._on_map_scale_changed)
+        row.addWidget(self.map_scale)
+        clear_btn = QPushButton("清除轨迹")
+        clear_btn.clicked.connect(self._clear_map)
+        row.addWidget(clear_btn)
+        row.addStretch(1)
+        lay.addLayout(row)
+        self.map_plot = pg.PlotWidget(title="单圈轨迹叠加")
+        self.map_plot.setAspectLocked(True)
+        self.map_plot.showGrid(x=True, y=True, alpha=0.15)
+        self.map_plot.setLabel("bottom", "x (m)")
+        self.map_plot.setLabel("left", "y (m)")
+        lay.addWidget(self.map_plot, 1)
+        return box
+
+    def _on_map_scale_changed(self, value):
+        self.map_integrator.meters_per_unit = float(value)
+        self.status.setText("比例已更新：对已画轨迹不回溯重算，下一圈起生效。")
+
+    def _clear_map(self):
+        self.map_integrator.reset()
+        self.map_paths = [[]]
+        self._draw_map()
+
+    def _draw_map(self):
+        for curve in self._map_curves:
+            try:
+                self.map_plot.removeItem(curve)
+            except Exception:
+                pass
+        self._map_curves = []
+        for i, path in enumerate(self.map_paths):
+            if len(path) < 2:
+                continue
+            xs = [p[0] for p in path]
+            ys = [p[1] for p in path]
+            color = self.map_colors[i % len(self.map_colors)]
+            curve = self.map_plot.plot(
+                xs, ys, pen=pg.mkPen(color, width=2),
+                name=f"圈 {i + 1}")
+            self._map_curves.append(curve)
 
     def _build_lap_panel(self):
         box = QFrame()
@@ -267,6 +339,8 @@ class TrackLab(QWidget):
         self.lap_exit_base = 0
         self.table.setRowCount(0)
         self.corner_table.setRowCount(0)
+        self.map_integrator.reset()
+        self.map_paths = [[]]
         self._refresh_counts()
         self.status.setText("记录中 · 当前直线")
 
@@ -310,6 +384,7 @@ class TrackLab(QWidget):
         self.samples = []
         self.lap_enter_base = counts["enter"]
         self.lap_exit_base = counts["exit"]
+        self.map_paths.append([])
 
         r = self.table.rowCount()
         self.table.insertRow(r)
@@ -365,7 +440,12 @@ class TrackLab(QWidget):
             return
         now = time.monotonic()
         sample_time = now - self.session_start if self.session_start is not None else 0.0
-        self.samples.append(dict(data))
+        sample = dict(data)
+        sample["t"] = sample_time
+        self.samples.append(sample)
+        if self.map_paths:
+            self.map_paths[-1].append(
+                self.map_integrator.update(sample, sample_time))
         lap_no = len(self.laps) + 1
 
         events = self.corner.update(data, sample_time, lap_no=lap_no)

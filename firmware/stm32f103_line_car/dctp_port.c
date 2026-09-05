@@ -245,9 +245,18 @@ static void process_line(const char *line)
              set_parameter(key, value, &value);
         send_ack(key, value, sequence, has_sequence, ok);
     } else if (strcmp(type, "CMD") == 0) {
-        ok = strcmp(key, "emergency_stop") == 0;
-        if (ok) {
+        if (strcmp(key, "emergency_stop") == 0) {
             context.tuning.enabled = false;
+            ok = true;
+        } else if (strcmp(key, "fw_version") == 0) {
+            char note[64];
+            (void)snprintf(note, sizeof note,
+                           "{\"type\":\"NOTE\",\"data\":\"fw_version="
+                           DCTP_PORT_VERSION "\"}\n");
+            queue_tx(note, true);
+            ok = true;
+        } else {
+            ok = false;
         }
         send_ack(key, 0.0f, sequence, has_sequence, ok);
     }

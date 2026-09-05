@@ -29,7 +29,7 @@ class ApplicationReleaseTests(unittest.TestCase):
             env=env,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=90,  # 页面数量增长后，离屏构建在 CI 慢机上需要更长时间
         )
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
