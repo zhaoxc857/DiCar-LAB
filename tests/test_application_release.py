@@ -14,7 +14,7 @@ class ApplicationReleaseTests(unittest.TestCase):
         sys.path.insert(0, str(APP))
         from core.version import DISPLAY_VERSION
 
-        self.assertEqual("DiCAR LAB v1.10.0", DISPLAY_VERSION)
+        self.assertEqual("DiCAR LAB v1.11.0", DISPLAY_VERSION)
         self.assertEqual(
             DISPLAY_VERSION,
             (ROOT / "VERSION.txt").read_text(encoding="utf-8").strip(),
